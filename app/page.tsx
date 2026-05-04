@@ -148,7 +148,7 @@ const LOOP_STEPS = [
   },
   {
     title: "Write thesis",
-    body: "MiMo V2.5 Pro writes a dated research note with inline [ref:signalId] citations. Unsourced numbers are rejected.",
+    body: "MiMo V2.5 Pro writes a dated research note with numbered citations linking each claim to a signal. Unsourced numbers are rejected.",
   },
   {
     title: "Execute",
