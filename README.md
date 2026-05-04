@@ -9,8 +9,6 @@ composition, and rebalances a paper book across MAG7.ssi, DEFI.ssi, and
 MEME.ssi. Wave 1 is paper trading with a fully transparent decision log.
 Wave 2 takes execution live through SoDEX on ValueChain.
 
-> Submission for the **SoSoValue Buildathon 2026**, Wave 1
-> (build window May 1 to May 12, 2026; evaluation May 13 to May 17).
 
 ---
 
@@ -298,18 +296,6 @@ recent US ETF close is more than 36 hours stale.
 See [docs/wave-changelog.md](docs/wave-changelog.md) for the explicit
 deliverables ledger.
 
----
-
-## Demo
-
-- **Live URL:** http://43.153.109.3:8080 (VPS dev preview, Wave 1)
-- **Vercel deployment:** TBD before final submission
-- **Demo video:** TBD (3-minute walkthrough; see [docs/demo-script.md](docs/demo-script.md) for the storyboard)
-
-Screenshots will land in [public/demo-assets/](public/demo-assets/) ahead of
-submission.
-
----
 
 ## Documentation
 
