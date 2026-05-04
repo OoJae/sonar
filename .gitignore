@@ -32,6 +32,10 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
+
+# drizzle generated migrations (commit after reviewing)
+!/drizzle/
 
 # vercel
 .vercel
@@ -39,3 +43,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# internal dev artifacts (not for public repo)
+CLAUDE.md
+AGENTS.md
+.githooks/
+scripts/lint-prose.sh

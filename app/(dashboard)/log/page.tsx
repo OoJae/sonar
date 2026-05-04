@@ -1,0 +1,135 @@
+import { desc } from "drizzle-orm";
+import { db, schema } from "@/lib/db/client";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+
+export const dynamic = "force-dynamic";
+
+async function load() {
+  try {
+    const runs = await db()
+      .select()
+      .from(schema.agentRuns)
+      .orderBy(desc(schema.agentRuns.startedAt))
+      .limit(30);
+    return { runs, error: null as string | null };
+  } catch (err) {
+    return {
+      runs: [],
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+export default async function LogPage() {
+  const { runs, error } = await load();
+
+  return (
+    <div className="space-y-8">
+      <div className="flex flex-col gap-2">
+        <Badge
+          variant="outline"
+          className="mono w-fit text-[10px] uppercase tracking-[0.18em]"
+        >
+          transparent decision log
+        </Badge>
+        <h1 className="text-3xl font-semibold tracking-tight">Runs</h1>
+        <p className="max-w-2xl text-sm text-muted-foreground">
+          Every agent cycle, accepted or rejected, is recorded here with its
+          model, data source, and outcome. Drill into a run to read the thesis
+          on the Signals page.
+        </p>
+      </div>
+
+      {error ? (
+        <Card className="bg-card/70">
+          <CardHeader>
+            <CardTitle className="text-base">Database not reachable</CardTitle>
+            <CardDescription>
+              Set <span className="mono">DATABASE_URL</span> and run{" "}
+              <span className="mono">pnpm db:push</span>.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="mono text-[11px] text-muted-foreground">
+            {error}
+          </CardContent>
+        </Card>
+      ) : runs.length === 0 ? (
+        <Card className="bg-card/70">
+          <CardHeader>
+            <CardTitle className="text-base">No runs yet</CardTitle>
+            <CardDescription>
+              Trigger a cycle by POSTing to{" "}
+              <span className="mono">/api/agent/run</span>.
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      ) : (
+        <Card className="bg-card/70">
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Started</TableHead>
+                  <TableHead>Duration</TableHead>
+                  <TableHead>Model</TableHead>
+                  <TableHead>Data</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Trace</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {runs.map((run) => {
+                  const start = run.startedAt;
+                  const end = run.finishedAt ?? new Date();
+                  const durMs = end.getTime() - start.getTime();
+                  return (
+                    <TableRow key={run.id}>
+                      <TableCell className="mono text-[11px] text-muted-foreground">
+                        {start.toISOString().replace("T", " ").slice(0, 16)}Z
+                      </TableCell>
+                      <TableCell className="mono">
+                        {(durMs / 1000).toFixed(1)}s
+                      </TableCell>
+                      <TableCell className="mono text-xs">
+                        {run.model}
+                      </TableCell>
+                      <TableCell className="mono text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                        {run.dataSource}
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={run.ok ? "default" : "destructive"}
+                          className="mono text-[10px] uppercase tracking-[0.18em]"
+                        >
+                          {run.ok ? "ok" : "failed"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="mono text-[11px] text-muted-foreground">
+                        {run.traceId ?? "-"}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}

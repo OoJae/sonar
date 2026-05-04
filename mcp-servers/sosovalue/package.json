@@ -1,0 +1,12 @@
+{
+  "name": "@sonar/mcp-sosovalue",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "sonar-sosovalue-mcp": "./index.ts"
+  },
+  "scripts": {
+    "start": "tsx index.ts"
+  }
+}

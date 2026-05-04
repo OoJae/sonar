@@ -1,0 +1,12 @@
+{
+  "name": "@sonar/mcp-sodex",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "sonar-sodex-mcp": "./index.ts"
+  },
+  "scripts": {
+    "start": "tsx index.ts"
+  }
+}
