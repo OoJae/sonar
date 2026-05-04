@@ -19,6 +19,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { FlowChart } from "@/components/flow-chart";
+import { ReasoningWithCitations } from "@/components/reasoning-with-citations";
 import { getEtfSummaryHistory } from "@/lib/sosovalue/client";
 import type { EtfAsset } from "@/lib/agent/thesis";
 
@@ -182,11 +183,14 @@ function Reasoning({ thesis }: { thesis: Thesis }) {
       <CardHeader>
         <CardTitle className="text-base">Reasoning</CardTitle>
         <CardDescription>
-          Inline [ref:id] tags link back to signal ids in this thesis.
+          Numbered superscripts link to the cited signal or article.
         </CardDescription>
       </CardHeader>
-      <CardContent className="prose prose-invert max-w-none text-sm leading-7 text-foreground/90 whitespace-pre-wrap">
-        {thesis.reasoning}
+      <CardContent>
+        <ReasoningWithCitations
+          reasoning={thesis.reasoning}
+          thesis={thesis}
+        />
       </CardContent>
       <Separator />
       <CardContent>

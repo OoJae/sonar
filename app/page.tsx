@@ -140,7 +140,7 @@ function Feature({
 const LOOP_STEPS = [
   {
     title: "Ingest",
-    body: "Pull ETF net flows and categorized news from SoSoValue. Cache aggressively. Respect the 20-request-per-minute budget.",
+    body: "Pull ETF net flows and categorized news from SoSoValue. Stay within the 100-request-per-minute budget on the High Frequency tier.",
   },
   {
     title: "Read on-chain",

@@ -71,7 +71,7 @@ export async function cacheSet<T>(
   });
 }
 
-// Token bucket: at most 20 requests per rolling 60s window.
+// Token bucket: at most RATE_LIMIT_RPM requests per rolling RATE_LIMIT_WINDOW_SEC window.
 // Shared across the process via Redis INCR with EXPIRE, or in-memory fallback.
 export async function acquireToken(): Promise<boolean> {
   const r = getRedis();

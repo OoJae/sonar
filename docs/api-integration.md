@@ -4,7 +4,7 @@
 
 Base URL: `https://openapi.sosovalue.com`
 Auth header: `x-soso-api-key: <SOSOVALUE_API_KEY>`
-Rate limit (beta): 20 requests per minute.
+Rate limit (High Frequency tier): 100 requests per minute.
 
 Wave 1 uses five endpoints. All are wrapped by `lib/sosovalue/client.ts` and
 flow through `lib/sosovalue/cache.ts` for TTL and token-bucket handling.
