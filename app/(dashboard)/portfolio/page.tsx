@@ -219,26 +219,59 @@ function TradesTable({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {trades.map((t) => (
-                <TableRow key={t.id}>
-                  <TableCell className="mono text-[11px] text-muted-foreground">
-                    {t.executedAt.toISOString().replace("T", " ").slice(5, 16)}
-                  </TableCell>
-                  <TableCell className="mono">{t.market}</TableCell>
-                  <TableCell className="mono uppercase text-xs tracking-[0.16em] text-muted-foreground">
-                    {t.side}
-                  </TableCell>
-                  <TableCell className="mono text-right">
-                    {formatUSD(Number(t.notionalUsd))}
-                  </TableCell>
-                  <TableCell className="mono text-right">
-                    {formatUSD(Number(t.fillPrice))}
-                  </TableCell>
-                  <TableCell className="mono text-[11px] text-muted-foreground">
-                    {t.thesisId.slice(0, 8)}
-                  </TableCell>
-                </TableRow>
-              ))}
+              {trades.map((row) => {
+                const t = row.trade;
+                const thesisDate = row.thesisGeneratedAt
+                  ? row.thesisGeneratedAt
+                      .toISOString()
+                      .replace("T", " ")
+                      .slice(5, 16)
+                  : null;
+                const chipText = thesisDate ?? t.thesisId.slice(0, 8);
+                return (
+                  <TableRow key={t.id}>
+                    <TableCell className="mono text-[11px] text-muted-foreground">
+                      {t.executedAt
+                        .toISOString()
+                        .replace("T", " ")
+                        .slice(5, 16)}
+                    </TableCell>
+                    <TableCell className="mono">{t.market}</TableCell>
+                    <TableCell className="mono uppercase text-xs tracking-[0.16em] text-muted-foreground">
+                      {t.side}
+                    </TableCell>
+                    <TableCell className="mono text-right">
+                      {formatUSD(Number(t.notionalUsd))}
+                    </TableCell>
+                    <TableCell className="mono text-right">
+                      {formatUSD(Number(t.fillPrice))}
+                    </TableCell>
+                    <TableCell className="text-[11px]">
+                      {row.thesisRunId ? (
+                        <a
+                          href={`/log#run-${row.thesisRunId}`}
+                          className="mono text-muted-foreground hover:text-accent hover:underline"
+                          title={t.thesisId}
+                        >
+                          {chipText}
+                          {row.thesisMode ? (
+                            <span className="ml-2 uppercase tracking-[0.14em] text-accent">
+                              {row.thesisMode}
+                            </span>
+                          ) : null}
+                        </a>
+                      ) : (
+                        <span
+                          className="mono text-muted-foreground"
+                          title={t.thesisId}
+                        >
+                          {chipText}
+                        </span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         )}

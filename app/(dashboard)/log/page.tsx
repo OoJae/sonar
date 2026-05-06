@@ -53,6 +53,9 @@ export default async function LogPage() {
           model, data source, and outcome. Drill into a run to read the thesis
           on the Signals page.
         </p>
+        <p className="max-w-2xl text-xs text-muted-foreground/70">
+          Langfuse trace links land in Wave 2.
+        </p>
       </div>
 
       {error ? (
@@ -89,7 +92,6 @@ export default async function LogPage() {
                   <TableHead>Model</TableHead>
                   <TableHead>Data</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>Trace</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -98,7 +100,11 @@ export default async function LogPage() {
                   const end = run.finishedAt ?? new Date();
                   const durMs = end.getTime() - start.getTime();
                   return (
-                    <TableRow key={run.id}>
+                    <TableRow
+                      key={run.id}
+                      id={`run-${run.id}`}
+                      className="target:bg-accent/5"
+                    >
                       <TableCell className="mono text-[11px] text-muted-foreground">
                         {start.toISOString().replace("T", " ").slice(0, 16)}Z
                       </TableCell>
@@ -118,9 +124,6 @@ export default async function LogPage() {
                         >
                           {run.ok ? "ok" : "failed"}
                         </Badge>
-                      </TableCell>
-                      <TableCell className="mono text-[11px] text-muted-foreground">
-                        {run.traceId ?? "-"}
                       </TableCell>
                     </TableRow>
                   );

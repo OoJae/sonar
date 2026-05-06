@@ -196,8 +196,17 @@ export async function getPositions(): Promise<PaperPosition[]> {
 
 export async function recentTrades(limit = 20) {
   return db()
-    .select()
+    .select({
+      trade: schema.paperTrades,
+      thesisGeneratedAt: schema.theses.generatedAt,
+      thesisMode: schema.theses.mode,
+      thesisRunId: schema.theses.runId,
+    })
     .from(schema.paperTrades)
+    .leftJoin(
+      schema.theses,
+      eq(schema.paperTrades.thesisId, schema.theses.id),
+    )
     .orderBy(desc(schema.paperTrades.executedAt))
     .limit(limit);
 }

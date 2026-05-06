@@ -117,4 +117,8 @@
       linear-gradient(to bottom, var(--border) 1px, transparent 1px);
     background-size: 48px 48px;
   }
+  [id^="run-"]:target {
+    background-color: color-mix(in oklab, var(--accent) 12%, transparent);
+    box-shadow: inset 2px 0 0 var(--accent);
+  }
 }
