@@ -8,6 +8,7 @@ import {
   integer,
   boolean,
   pgEnum,
+  primaryKey,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -46,16 +47,24 @@ export const theses = pgTable("theses", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
-export const signals = pgTable("signals", {
-  id: text("id").primaryKey(),
-  thesisId: uuid("thesis_id")
-    .notNull()
-    .references(() => theses.id, { onDelete: "cascade" }),
-  kind: text("kind").notNull(),
-  payload: jsonb("payload").notNull(),
-  sourceEndpoint: text("source_endpoint"),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-});
+export const signals = pgTable(
+  "signals",
+  {
+    id: text("id").notNull(),
+    thesisId: uuid("thesis_id")
+      .notNull()
+      .references(() => theses.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    payload: jsonb("payload").notNull(),
+    sourceEndpoint: text("source_endpoint"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.thesisId, t.id] }),
+  }),
+);
 
 export const paperTrades = pgTable("paper_trades", {
   id: uuid("id").primaryKey().defaultRandom(),
