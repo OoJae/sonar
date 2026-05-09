@@ -18,8 +18,11 @@ Source of truth: `lib/agent/thesis.ts` (`ThesisSchema`).
   reasoning: string,                 // markdown, inline [ref:signalId] cites
   proposedAllocations: {
     index: "MAG7" | "DEFI" | "MEME",
-    targetWeight: 0..1,              // sum of all targets <= 1
-    deltaFromCurrent: number         // USD delta vs current book
+    targetWeight: 0..1,              // sum of all targets <= 1; runner sizes
+                                     // paper trades from this field
+    deltaFromCurrent: number         // informational only, in fractional
+                                     // weight points (0.10 = +10pp). Runner
+                                     // ignores this for execution.
   }[],
   hedges: {
     market: string,                  // e.g. "BTC-PERP"

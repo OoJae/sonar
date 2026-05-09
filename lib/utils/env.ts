@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-const EnvSchema = z.object({
+const EnvShape = z.object({
   NODE_ENV: z
     .enum(["development", "test", "production"])
     .default("development"),
@@ -16,7 +16,7 @@ const EnvSchema = z.object({
     // we include the `/v1` segment here. Final URL: `<baseURL>/messages`.
     .default("https://token-plan-sgp.xiaomimimo.com/anthropic/v1"),
 
-  // SoSoValue REST API (beta tier, 20 req/min)
+  // SoSoValue REST API (High Frequency tier, 100 req/min)
   SOSOVALUE_API_KEY: z.string().min(1).optional(),
   SOSOVALUE_BASE_URL: z
     .string()
@@ -47,8 +47,23 @@ const EnvSchema = z.object({
   LANGFUSE_SECRET_KEY: z.string().min(1).optional(),
   LANGFUSE_BASE_URL: z.string().url().default("https://cloud.langfuse.com"),
 
-  // Vercel Cron secret (protects app/api/cron/daily)
+  // Cron secret (protects app/api/cron/daily and app/api/agent/run)
   CRON_SECRET: z.string().min(1).optional(),
+});
+
+// Production hardening: refuse to boot if CRON_SECRET is unset in production.
+// Without the secret, the cron and manual-run endpoints would be open to the
+// public internet. Dev mode is unaffected so local cycles still work without
+// a token.
+const EnvSchema = EnvShape.superRefine((cfg, ctx) => {
+  if (cfg.NODE_ENV === "production" && !cfg.CRON_SECRET) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["CRON_SECRET"],
+      message:
+        "CRON_SECRET is required in production to gate /api/cron/daily and /api/agent/run",
+    });
+  }
 });
 
 export type Env = z.infer<typeof EnvSchema>;
@@ -81,7 +96,7 @@ export function env(): Env {
 
 export function envReport() {
   const parsed = EnvSchema.safeParse(process.env);
-  const keys = Object.keys(EnvSchema.shape) as (keyof Env)[];
+  const keys = Object.keys(EnvShape.shape) as (keyof Env)[];
   return keys.map((key) => {
     const raw = process.env[key as string];
     return {

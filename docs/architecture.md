@@ -13,23 +13,23 @@ this split; every UI surface that discusses execution labels the chain.
 User (browser)
   |
   v
-Next.js App Router (Vercel)
+Next.js App Router (Vercel-ready, deployed on VPS for Wave 1)
   |-- app/(dashboard)/*      server components, read DB
   |-- app/api/agent/run      POST, triggers one cycle
-  |-- app/api/cron/daily     Vercel Cron at 21:30 UTC, weekdays
+  |-- app/api/cron/daily     Host crontab at 21:30 UTC, weekdays (Mon-Fri)
   |-- app/api/signals        GET, latest theses
   `-- app/api/portfolio      GET, positions + trades
 
 lib/agent/runner.ts
   |-- Vercel AI SDK (tool loop, stopWhen=stepCountIs(16))
-  |-- @ai-sdk/anthropic (re-pointed) -> MiMo-V2.5-Pro on Xiaomi's
-  |   Anthropic-compat relay (https://token-plan-sgp.xiaomimimo.com/anthropic)
-  |-- Tools: listCurrencies, getHistoricalFlows, getCurrentEtfMetrics,
-  |           getFeaturedNews, getCurrencyNews, readSsiIndex,
-  |           readAllSsiIndexes, submitThesis
+  |-- @ai-sdk/anthropic (re-pointed) -> mimo-v2.5-pro on Xiaomi's
+  |   Anthropic-compat relay (https://token-plan-sgp.xiaomimimo.com/anthropic/v1)
+  |-- Tools: listCurrencies, getHistoricalFlows, getEtfList,
+  |           getFeaturedNews, readSsiIndex, readAllSsiIndexes,
+  |           submitThesis
   `-- On success: validate thesis -> persist -> execute paper trades
 
-lib/sosovalue     REST client, Upstash token bucket (20/min),
+lib/sosovalue     REST client, Upstash token bucket (100/min, High Frequency),
                   stale cache fallback, fixture mode for dev
 lib/ssi           viem multicall against Base
 lib/sodex         paper engine (Drizzle) + thin live client for spot pairs
@@ -46,11 +46,10 @@ lib/db            Drizzle schema + postgres-js client
 
 ## Caching
 SoSoValue responses cache in Upstash Redis with per-endpoint TTLs:
-currency/list 24h, news 15m, currentEtfDataMetrics 1h,
-historicalInflowChart 6h. A rolling 20/min token bucket enforces the beta
-tier rate limit. Each response is also duplicated under a `:stale` key with a
-longer TTL, so a rate limit miss can fall back to stale data without
-breaking the agent.
+currencies 24h, news 15m, etf list 1h, etf summary history 6h. A rolling
+100/min token bucket matches the High Frequency tier rate limit. Each
+response is also duplicated under a `:stale` key with a longer TTL, so a
+rate limit miss can fall back to stale data without breaking the agent.
 
 ## Observability
 Every cycle writes structured logs via `lib/utils/logger.ts`. When Langfuse

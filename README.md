@@ -62,7 +62,7 @@ Two chains, one agent.
                   21:30 UTC weekdays (post US ETF close)
                                   |
                                   v
-                       Host crontab / Vercel Cron
+                            Host crontab
                                   |
                                   v
                  GET /api/cron/daily   (CRON_SECRET gated)

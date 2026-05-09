@@ -18,10 +18,13 @@ Protocol. Every trade is paper in Wave 1 and live in Wave 2."
 
 ## 01:00 to 02:30 - Live walkthrough
 1. Navigate to `/signals`. Show the latest thesis: headline, allocation
-   table, ETF flow bar chart, reasoning with inline citations.
-2. Click a citation to prove it resolves to a signal id.
-3. Navigate to `/portfolio`. Point out the paper P&L, the thesis id column,
-   and the "Wave 1 paper" badge.
+   table, ETF flow bar chart, reasoning with numbered superscript citations.
+2. Click any `[N]` chip; news refs open the original article in a new tab,
+   ETF flow refs show a tooltip naming the signal. Scroll to the Sources
+   block beneath the prose to see every cited id with its label and link.
+3. Navigate to `/portfolio`. Point out the paper P&L, the date+mode chips
+   in the Thesis column that deep-link to `/log#run-<id>`, and the
+   "Wave 1 paper" badge.
 4. Navigate to `/log`. Scroll the run history. Highlight a rejected run to
    prove the validator rejects unsourced numbers.
 5. Open a terminal and `curl -X POST /api/agent/run`. While it runs, narrate:
