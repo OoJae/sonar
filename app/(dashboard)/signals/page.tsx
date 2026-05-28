@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/table";
 import { FlowChart } from "@/components/flow-chart";
 import { ReasoningWithCitations } from "@/components/reasoning-with-citations";
+import { OrderPreview } from "@/components/order-preview";
 import { getEtfSummaryHistory } from "@/lib/sosovalue/client";
 import type { EtfAsset } from "@/lib/agent/thesis";
 
@@ -88,6 +89,7 @@ export default async function SignalsPage() {
         ))}
       </div>
       <Reasoning thesis={thesis} />
+      <OrderPreview thesisId={thesis.id} />
       <NewsBlock thesis={thesis} />
     </div>
   );
