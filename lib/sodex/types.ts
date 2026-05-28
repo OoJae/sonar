@@ -56,3 +56,76 @@ export const SpotPairSchema = z.object({
   minNotional: z.number().optional(),
 });
 export type SpotPair = z.infer<typeof SpotPairSchema>;
+
+// ----------------------------------------------------------------------------
+// Wave 2 SoDEX testnet response shapes.
+//
+// All schemas use .passthrough() so the wire returning fields beyond what we
+// model does not break parsing. Per docs/sodex-live.md, the SoDEX REST surface
+// is not exhaustively documented; we only validate the fields we read.
+//
+// Order status responses use single-character field codes (c, X, i, ps, etc.)
+// per the REST v1 schema page; we coerce them into the longer-form names that
+// our internal code uses.
+// ----------------------------------------------------------------------------
+
+// Documented wire-side status enum per the schema page.
+export const SodexOrderStatusSchema = z.enum([
+  "NEW",
+  "PARTIALLY_FILLED",
+  "FILLED",
+  "CANCELED",
+  "REJECTED",
+  "EXPIRED",
+]);
+export type SodexOrderStatus = z.infer<typeof SodexOrderStatusSchema>;
+
+// Map the SoDEX wire status onto our internal lib/db/schema.ts orderStatusEnum
+// per docs/sodex-live.md §6. CANCELED and EXPIRED collapse onto failed.
+export function mapSodexStatus(
+  s: SodexOrderStatus,
+): "submitted" | "partially_filled" | "filled" | "failed" | "rejected" {
+  switch (s) {
+    case "NEW":
+      return "submitted";
+    case "PARTIALLY_FILLED":
+      return "partially_filled";
+    case "FILLED":
+      return "filled";
+    case "REJECTED":
+      return "rejected";
+    case "CANCELED":
+    case "EXPIRED":
+      return "failed";
+  }
+}
+
+// Account state response. We only read `aid` (account id); everything else
+// flows through .passthrough().
+export const AccountStateSchema = z
+  .object({
+    aid: z.number(),
+  })
+  .passthrough();
+export type AccountState = z.infer<typeof AccountStateSchema>;
+
+// Symbol info returned from the listing endpoint. The schema page documents
+// id + name as mandatory; we don't read the other fields directly.
+export const SymbolInfoSchema = z
+  .object({
+    id: z.number(),
+    name: z.string(),
+  })
+  .passthrough();
+export type SymbolInfo = z.infer<typeof SymbolInfoSchema>;
+
+// Order status payload (single-character field codes). Phase 2.2 uses this
+// when polling for fills.
+export const SodexOrderSnapshotSchema = z
+  .object({
+    c: z.string(),               // clOrdID
+    X: SodexOrderStatusSchema,   // status
+    i: z.union([z.string(), z.number()]).optional(), // system order id (we coerce to string)
+  })
+  .passthrough();
+export type SodexOrderSnapshot = z.infer<typeof SodexOrderSnapshotSchema>;

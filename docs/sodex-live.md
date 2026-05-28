@@ -85,8 +85,9 @@ The `name` field switches between `"spot"` and `"futures"` depending on which RE
 5. `payloadHash = keccak256(utf8Bytes(compactJson))`. viem: `keccak256(toBytes(JSON.stringify(payload)))`.
 
 ### Signature shape
-1. Sign the ExchangeAction with viem: `account.signTypedData({ domain, types, primaryType, message })`. Returns 65 bytes hex.
-2. Prepend `0x01` → final `X-API-Sign` is `"0x01" + signature.slice(2)`.
+1. Sign the ExchangeAction with viem: `account.signTypedData({ domain, types, primaryType, message })`. Returns 65 bytes hex (`r||s||v`).
+2. **Normalize the recovery byte (`v`)**: viem returns v as 27 or 28 per Ethereum legacy convention, but the SoDEX server (using go-ethereum's `crypto.SigToPub`) expects v as 0 or 1. Subtract 27 if v >= 27 before continuing. Without this normalization the server returns `code: -1, error: "internal error: Failed to recover signer: Invalid recovery ID: bad recovery id"` despite everything else being correct.
+3. Prepend `0x01` so the final `X-API-Sign` is `"0x01" + r + s + normalizedV` (66 bytes wire format, 132 hex chars after `0x`).
 
 ### Nonce window
 - `X-API-Nonce` is a uint64 unix millisecond timestamp.
@@ -113,8 +114,11 @@ The response returns the user's primary `aid` (account id). The `aid` must be pa
 ### Response shape (key field)
 - `aid` (number): the account id. Per `WsPerpsState` schema in `/api/rest-v1/schema.md`. Other fields exist (positions, balances) and should be passed through with Zod `.passthrough()`.
 
-### Auth requirement
-Account state on testnet is a signed read. Send `X-API-Sign`, `X-API-Nonce`, `X-API-Chain` over the canonical `getAccountState` payload. **UNCONFIRMED** whether the GET requires a request body for signing or just the path; validate by curl during executor implementation. If signing the GET fails, retry with the same path as the payload JSON to canonicalize.
+### Auth requirement (CONFIRMED 2026-05-28)
+Account state on testnet is an **UNSIGNED** public read. An unauthenticated `curl` with `Accept: application/json` returns 200 with the full account record (`user`, `aid`, `uid`, balances, etc.). The Discord clarification said *"before signing any trading actions, fetch account state"*; it did not say the fetch itself requires signing. `lib/sodex/client.ts` issues this as a plain GET. Signed-auth validation lives in the order submit path (Phase 2.2).
+
+### URL gotcha (CONFIRMED 2026-05-28)
+`SODEX_TESTNET_BASE_URL` must include the `/api/v1` segment. The gateway 404s when the request lands at `https://testnet-gw.sodex.dev/perps/accounts/...`; the working URL is `https://testnet-gw.sodex.dev/api/v1/perps/accounts/...`. The `.env.example` default carries `/api/v1`; do not strip it.
 
 ---
 
@@ -210,15 +214,26 @@ Order status responses use short single-character field codes:
 
 Be defensive when parsing: use Zod `.passthrough()` and explicit per-key handling rather than camelCase auto-conversion.
 
-### Polling endpoint
-**UNCONFIRMED path.** Two candidates to try:
+### Polling endpoints (CONFIRMED 2026-05-28 from Go SDK + live probes)
+Three useful read paths, all unsigned:
+- `GET /api/v1/perps/accounts/{address}/orders` returns open orders only.
+- `GET /api/v1/perps/accounts/{address}/orders/history` returns terminal-state orders. Empty during testing on an unfunded account.
+- `GET /api/v1/perps/accounts/{address}/trades` returns user fill events.
 
-#### Option A. REST polling
-- `GET /trade/orders?accountID=<aid>&clOrdID=<id>` (UNCONFIRMED path)
-- `GET /trade/orders/{orderId}` (UNCONFIRMED path)
+WebSocket subscriptions (`wss://testnet-gw.sodex.dev/ws/perps`) are documented but `lib/sodex/live.ts` uses REST polling for Wave 2 (one fewer dep, sufficient for our daily cadence).
 
-#### Option B. WebSocket subscription
-Subscribe to order updates over `wss://testnet-gw.sodex.dev/ws/perps` (or `/ws/spot`). This is the more reliable path and matches modern exchange patterns, but adds a WS dep to the executor. Defer WS unless polling is unavailable.
+### Submit response envelope (CONFIRMED 2026-05-28)
+Two layers of error checking are required:
+1. **Top-level envelope.** `{code, timestamp, ...}` where `code != 0` means the request was malformed (signing wrong, payload broken, etc.).
+2. **Per-order.** `data[]` is an array with one record per submitted order: `{code, clOrdID, error?, ...}`. The engine accepts the batch HTTP-wise but rejects individual orders for business reasons (insufficient margin, bad price, dust). Without this check, the surrounding code treats engine-rejected orders as phantom fills.
+
+Concrete example seen on testnet for an unfunded perps account:
+```json
+{"code":0,"timestamp":1780002117227,"data":[{"code":-1,"clOrdID":"sonar-0703fa117fb86ac8","error":"insufficient margin"}]}
+```
+
+### clOrdID format (CONFIRMED 2026-05-28)
+The bare keccak hex string (`0x` + 64 hex chars) is rejected with `error: "clOrdID is invalid"`. Use a short alphanumeric+dash format like `sonar-<16 hex>`. `lib/sodex/live.ts` does this by hashing `${thesisId}:${market}` then slicing.
 
 ### Polling strategy (when REST polling path is confirmed)
 - 500ms initial delay, multiplier 1.5, cap 5s.
@@ -293,15 +308,25 @@ Each of these must be curl-confirmed (or Discord-clarified) before the matching 
 
 | # | Question | Blocks |
 |---|---|---|
-| 1 | Account-state signed-read canonical payload shape | §4 implementation |
-| 2 | Symbol listing endpoint path + symbol format | Task 1.3 |
-| 3 | Exact `side` value for sell | Task 2.2 |
-| 4 | Exact `type` value for limit | Task 2.2 |
-| 5 | Order status endpoint path (or WS-only) | Task 2.2 polling |
-| 6 | `funds` semantics for market-buy notional | Task 2.2 |
-| 7 | `positionSide` values for short positions on perps | Task 2.2 (hedges) |
+| 1 | ~~Account-state signed-read canonical payload shape~~ RESOLVED 2026-05-28: endpoint is unsigned, no canonical payload needed | done |
+| 2 | ~~Symbol listing endpoint path + symbol format~~ RESOLVED 2026-05-28: `GET /api/v1/perps/markets/symbols` (unsigned). Returns 43 symbols with numeric `id`, `name` like `BTC-USD`, plus precision, leverage, minNotional. BTC=1, ETH=2, SOL=4. | done |
+| 3 | ~~Exact `side` value for sell~~ RESOLVED 2026-05-28 from Go SDK: Buy=1, Sell=2 (OrderSide iota). | done |
+| 4 | ~~Exact `type` value for limit~~ RESOLVED 2026-05-28 from Go SDK: Limit=1, Market=2 (OrderType iota). | done |
+| 5 | ~~Order status endpoint path~~ RESOLVED 2026-05-28: `/perps/accounts/{addr}/orders` (open), `/orders/history` (terminal), `/trades` (fills). All unsigned. | done |
+| 6 | ~~`funds` semantics for market-buy notional~~ RESOLVED 2026-05-28: `funds` is USD notional, accepted as a DecimalString. Mutually exclusive with `quantity`. | done |
+| 7 | ~~`positionSide` values for short positions on perps~~ RESOLVED 2026-05-28 from Go SDK: Both=1, Long=2, Short=3. | done |
 | 8 | Testnet faucet URL | B2 |
 | 9 | Spot vs perps order endpoint path symmetry | Task 2.2 |
+
+Additional values resolved 2026-05-28 from the Go SDK at https://github.com/sodex-tech/sodex-go-sdk-public:
+- `TimeInForce`: GTC=1, FOK=2, IOC=3, GTX=4 (post-only).
+- `OrderModifier`: Normal=1, Stop=2, Bracket=3, AttachedStop=4.
+- `SignatureType`: EIP712=1 (the prefix byte at signature[0]).
+- The wire signature is 66 bytes total: `[0x01]` + 65-byte ECDSA (r||s||v). Header is `X-API-Sign: 0x<hex of all 66 bytes>`.
+- The SDK does NOT send `X-API-Chain` on signed requests; signing already binds chainId via the EIP-712 domain. Our client omits this header to match.
+- `PerpsDomainName = "futures"`, `SpotDomainName = "spot"` (confirmed from common/types/eip712.go).
+- Confirmed body shape (perps newOrder): `{accountID, symbolID, orders[{clOrdID, modifier, side, type, timeInForce, price?, quantity?, funds?, stopPrice?, stopType?, triggerType?, reduceOnly, positionSide}]}`. **Field order matters** because the server re-marshals via json.Marshal to recompute the payloadHash; preserve the order above when building the payload in JavaScript.
+- Signing payload (what gets hashed) is `{"type":"newOrder","params":<body>}`; HTTP body is just `<body>` (the params object).
 
 Action: resolve 1, 2, 8 in B1 / B2. Resolve 3, 4, 5, 6, 7, 9 during Task 2.2 implementation via the signed-read first, then progressively narrow with the smoke script.
 

@@ -1,8 +1,23 @@
-import "server-only";
+// No `import "server-only"`: this module is imported from scripts/sodex-*.ts
+// smoke tests under tsx. Same reasoning as lib/db/client.ts and
+// lib/sodex/paper.ts. None of the exported functions are safe to bundle into
+// a client component, but the boundary is enforced by route-level use
+// rather than import attribute.
 import { z } from "zod";
+import { keccak256, toBytes } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
 import { env } from "@/lib/utils/env";
 import { logger } from "@/lib/utils/logger";
-import { SpotPairSchema, type SpotPair } from "./types";
+import {
+  AccountStateSchema,
+  SpotPairSchema,
+  SymbolInfoSchema,
+  SodexOrderSnapshotSchema,
+  type AccountState,
+  type SpotPair,
+  type SymbolInfo,
+  type SodexOrderSnapshot,
+} from "./types";
 
 // Thin Wave 1 SoDEX client. We hit the documented REST endpoints to prove
 // integration (bonus credit) without committing to live execution. Paper
@@ -91,4 +106,714 @@ export async function healthCheck(): Promise<SodexHealth> {
       note: err instanceof Error ? err.message : "network error",
     };
   }
+}
+
+// ===========================================================================
+// Wave 2: SoDEX testnet signed-request layer.
+//
+// All calls below sign with the master wallet private key per the Discord
+// clarification documented in docs/sodex-live.md §1. The X-API-Key header is
+// deliberately omitted on testnet. Signatures are EIP-712 typed-data with
+// the payloadHash + uint64 nonce structure documented in §3.
+// ===========================================================================
+
+const TESTNET_CHAIN_ID = 138565;
+const SIG_PREFIX = "0x01";
+
+type Kind = "spot" | "perps";
+
+// Cached signer so we do not re-derive the address per request.
+let cachedAccount: ReturnType<typeof privateKeyToAccount> | null = null;
+function getAccount() {
+  if (cachedAccount) return cachedAccount;
+  const key = env().SODEX_WALLET_PRIVATE_KEY;
+  if (!key) {
+    throw new Error(
+      "SODEX_WALLET_PRIVATE_KEY is not set. Required for any signed testnet call.",
+    );
+  }
+  cachedAccount = privateKeyToAccount(key as `0x${string}`);
+  return cachedAccount;
+}
+
+export function getSignerAddress(): `0x${string}` {
+  return getAccount().address;
+}
+
+function testnetGateway(kind: Kind): string {
+  return `${env().SODEX_TESTNET_BASE_URL}/${kind}`;
+}
+
+// EIP-712 domain. The `name` field switches between "spot" and "futures"
+// depending on which REST surface the request targets, per the schema page.
+function eipDomain(kind: Kind) {
+  return {
+    name: kind === "spot" ? "spot" : "futures",
+    version: "1",
+    chainId: TESTNET_CHAIN_ID,
+    verifyingContract: "0x0000000000000000000000000000000000000000" as const,
+  };
+}
+
+const exchangeActionTypes = {
+  ExchangeAction: [
+    { name: "payloadHash", type: "bytes32" },
+    { name: "nonce", type: "uint64" },
+  ],
+} as const;
+
+// Used for monotonically increasing nonces across rapid retries within a
+// single process. Date.now() resolution is 1ms, which is enough for our
+// cadence; this bump just guards against same-millisecond collisions.
+let lastNonce = 0n;
+function nextNonce(): bigint {
+  const now = BigInt(Date.now());
+  if (now <= lastNonce) {
+    lastNonce = lastNonce + 1n;
+  } else {
+    lastNonce = now;
+  }
+  return lastNonce;
+}
+
+type SignedAction<T extends Record<string, unknown>> = {
+  type: string;
+  params: T;
+};
+
+// Build the canonical payload + signed headers for a single action. Returns
+// both because the body of the HTTP request is `params` (not the whole
+// payload), while the signature covers the whole `{type, params}` envelope.
+async function signAction<T extends Record<string, unknown>>(
+  kind: Kind,
+  action: SignedAction<T>,
+): Promise<{
+  sign: `0x${string}`;
+  nonce: string;
+  payload: SignedAction<T>;
+}> {
+  const compactJson = JSON.stringify(action);
+  const payloadHash = keccak256(toBytes(compactJson));
+  const nonce = nextNonce();
+  const sig = await getAccount().signTypedData({
+    domain: eipDomain(kind),
+    types: exchangeActionTypes,
+    primaryType: "ExchangeAction",
+    message: { payloadHash, nonce },
+  });
+  // Normalize the ECDSA recovery byte (v). viem returns v as 27 or 28
+  // (Ethereum legacy convention). The SoDEX server uses go-ethereum's
+  // crypto.SigToPub which expects v as 0 or 1 (raw recovery id). Without
+  // this normalization the server errors `Invalid recovery ID: bad recovery
+  // id` despite payload + nonce + domain all being correct, because the
+  // last byte fails the recovery-id sanity check.
+  const rsHex = sig.slice(2, 130); // 64-byte r||s
+  const vByte = parseInt(sig.slice(130, 132), 16);
+  const normalizedV = vByte >= 27 ? vByte - 27 : vByte;
+  const normalizedHex = vByte === normalizedV ? sig.slice(130, 132) : normalizedV.toString(16).padStart(2, "0");
+  const rawSig = `0x${rsHex}${normalizedHex}`;
+  return {
+    sign: (SIG_PREFIX + rawSig.slice(2)) as `0x${string}`,
+    nonce: nonce.toString(),
+    payload: action,
+  };
+}
+
+// Stamp the signed-write headers onto a fetch request. Two headers, by design:
+// X-API-Sign + X-API-Nonce. X-API-Key is omitted on testnet (Discord rule).
+// X-API-Chain is NOT included; the Go SDK does not send it and the chain ID
+// is already bound into the EIP-712 domain at signing time (see signAction).
+function signedHeaders(sign: `0x${string}`, nonce: string): HeadersInit {
+  return {
+    "Content-Type": "application/json",
+    Accept: "application/json",
+    "X-API-Sign": sign,
+    "X-API-Nonce": nonce,
+  };
+}
+
+// Defensive logger for non-2xx responses; never logs the signature beyond a
+// safe prefix and never logs the private key.
+async function logHttpError(
+  context: string,
+  res: Response,
+  sign: `0x${string}`,
+  nonce: string,
+): Promise<string> {
+  const body = await res.text().catch(() => "");
+  logger.warn("sodex.signed_http_error", {
+    context,
+    status: res.status,
+    nonce,
+    signPrefix: sign.slice(0, 10),
+    bodyHead: body.slice(0, 500),
+  });
+  return body;
+}
+
+// ---------------------------------------------------------------------------
+// Public API: getAccountState
+//
+// The mandatory pre-step before any signed trading action (per Discord
+// clarification in docs/sodex-live.md §4). The returned `aid` is what the
+// order payload's `accountID` field must equal exactly.
+//
+// Discovered against testnet 2026-05-28: this endpoint is an UNSIGNED public
+// read. We tried sending the EIP-712 signed-read variant and got 404 due to
+// a URL bug; an unsigned curl with just Accept: application/json returned 200
+// with the real account data. Keeping it unsigned matches actual server
+// behaviour and side-steps a class of signing bugs on a read that does not
+// need them. Signed-write validation lives in the order submit path (Phase 2.2).
+// ---------------------------------------------------------------------------
+export async function getAccountState(opts?: {
+  kind?: Kind;
+  address?: `0x${string}`;
+}): Promise<AccountState> {
+  const kind: Kind = opts?.kind ?? "perps";
+  const address = opts?.address ?? getSignerAddress();
+  const url = `${testnetGateway(kind)}/accounts/${address}/state`;
+  const res = await fetch(url, {
+    method: "GET",
+    headers: { Accept: "application/json" },
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    logger.warn("sodex.account_state_http_error", {
+      kind,
+      status: res.status,
+      bodyHead: body.slice(0, 200),
+    });
+    throw new Error(`SoDEX getAccountState ${kind} ${res.status}: ${body.slice(0, 200)}`);
+  }
+  const json: unknown = await res.json();
+  // Some endpoints return a wrapped envelope; unwrap defensively before
+  // schema validation.
+  const candidate =
+    typeof json === "object" && json !== null && "data" in (json as Record<string, unknown>)
+      ? (json as { data: unknown }).data
+      : json;
+  const parsed = AccountStateSchema.safeParse(candidate);
+  if (!parsed.success) {
+    logger.warn("sodex.account_state_parse_error", {
+      issues: parsed.error.issues.slice(0, 3),
+    });
+    throw new Error(
+      `SoDEX getAccountState ${kind} response did not match schema: ${
+        parsed.error.issues[0]?.message ?? "unknown"
+      }`,
+    );
+  }
+  return parsed.data;
+}
+
+// In-process cache of the per-kind account id. The aid is stable per process
+// and only the first call hits the wire; the rest are O(1).
+const aidCache = new Map<Kind, number>();
+export async function getAccountId(kind: Kind = "perps"): Promise<number> {
+  const hit = aidCache.get(kind);
+  if (hit !== undefined) return hit;
+  const state = await getAccountState({ kind });
+  aidCache.set(kind, state.aid);
+  return state.aid;
+}
+
+// ---------------------------------------------------------------------------
+// Public API: listPerpSymbols
+//
+// Public unauthenticated read returning all tradeable perpetual contracts on
+// the testnet. Each symbol carries a numeric `id` (the symbolID required by
+// order submission payloads) and a human-readable `name` like "BTC-USD".
+// 43 symbols at probe time on 2026-05-28; BTC=1, ETH=2, SOL=4.
+// ---------------------------------------------------------------------------
+const PerpSymbolsEnvelopeSchema = z
+  .object({ data: z.array(SymbolInfoSchema) })
+  .passthrough();
+
+export async function listPerpSymbols(): Promise<SymbolInfo[]> {
+  const url = `${testnetGateway("perps")}/markets/symbols`;
+  const res = await fetch(url, {
+    method: "GET",
+    headers: { Accept: "application/json" },
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`SoDEX listPerpSymbols ${res.status}: ${body.slice(0, 200)}`);
+  }
+  const json: unknown = await res.json();
+  const parsed = PerpSymbolsEnvelopeSchema.safeParse(json);
+  if (!parsed.success) {
+    throw new Error(
+      `SoDEX listPerpSymbols response did not match schema: ${
+        parsed.error.issues[0]?.message ?? "unknown"
+      }`,
+    );
+  }
+  return parsed.data.data;
+}
+
+// In-process cache of the (name -> id) map. Symbols are static-ish; the cache
+// stays warm for the process lifetime.
+let symbolNameToId: Map<string, number> | null = null;
+export async function resolvePerpSymbolId(name: string): Promise<number> {
+  if (!symbolNameToId) {
+    const list = await listPerpSymbols();
+    symbolNameToId = new Map(list.map((s) => [s.name, s.id]));
+  }
+  const id = symbolNameToId.get(name);
+  if (id === undefined) {
+    throw new Error(
+      `SoDEX perp symbol "${name}" not found in testnet listing. Available: ${
+        Array.from(symbolNameToId.keys()).slice(0, 10).join(", ")
+      }...`,
+    );
+  }
+  return id;
+}
+
+// ---------------------------------------------------------------------------
+// Order enums (mirroring the Go SDK in common/enums/*).
+//
+// Field order in the order payload matters: the SoDEX server re-marshals via
+// json.Marshal to recompute payloadHash, and json.Marshal in Go preserves
+// struct field order. JS object literals preserve insertion order in ES2015+,
+// so constructing the order with keys in the documented order produces a
+// canonical payload that matches what the server hashes.
+// ---------------------------------------------------------------------------
+const SodexOrderSide = { Buy: 1, Sell: 2 } as const;
+const SodexOrderType = { Limit: 1, Market: 2 } as const;
+const SodexTimeInForce = { GTC: 1, FOK: 2, IOC: 3, GTX: 4 } as const;
+const SodexPositionSide = { Both: 1, Long: 2, Short: 3 } as const;
+const SodexOrderModifier = { Normal: 1, Stop: 2, Bracket: 3, AttachedStop: 4 } as const;
+
+// Submit-order payload shape (matches perps/types/new_order_request.go).
+// quantity and funds are exclusive; specify exactly one. Market buys typically
+// use funds (USD notional), market sells use quantity (asset units).
+export type SubmitPerpOrderInput = {
+  side: "buy" | "sell";
+  symbolName: string;       // e.g. "BTC-USD"; resolved to symbolID via the cache.
+  type: "market" | "limit";
+  clOrdID: string;          // idempotency key (clientOrderId); the server returns the existing order on a re-submit.
+  // Exactly one of quantity / funds. For market orders we typically pass funds.
+  quantity?: string;
+  funds?: string;
+  // Required for limit orders only.
+  price?: string;
+  // Optional: defaults to Both (one-way mode). For explicit hedging on
+  // hedge-mode accounts, set Long or Short.
+  positionSide?: "both" | "long" | "short";
+};
+
+export type SubmitPerpOrderResult = {
+  clOrdID: string;
+  // The system order id ("i" in the wire response). May be returned synchronously
+  // on submit, or surface only on the next status poll.
+  sodexOrderId: string | null;
+  status: SodexOrderSnapshot["X"]; // wire-side status enum
+  // The raw response body, for logging and downstream debug.
+  raw: unknown;
+};
+
+// ---------------------------------------------------------------------------
+// Public API: submitPerpOrder
+//
+// Signs a NewOrderRequest with the master wallet private key (futures domain,
+// chainId 138565 on testnet) and posts to /perps/trade/orders. This is the
+// only call path that exercises signing on the testnet, so Phase 2.2's
+// scripts/sodex-live-smoke.ts is also the de-facto signing-validation test.
+//
+// Idempotency: pass the same clOrdID twice and the server should return the
+// existing order rather than create a second one. The lib/sodex/live.ts
+// caller persists an `orders` row before this call with the same clOrdID;
+// the DB-level unique constraint is the second backstop.
+// ---------------------------------------------------------------------------
+export async function submitPerpOrder(
+  input: SubmitPerpOrderInput,
+): Promise<SubmitPerpOrderResult> {
+  const symbolID = await resolvePerpSymbolId(input.symbolName);
+  const accountID = await getAccountId("perps");
+
+  if ((input.quantity === undefined) === (input.funds === undefined)) {
+    throw new Error(
+      "submitPerpOrder requires exactly one of { quantity, funds }.",
+    );
+  }
+  if (input.type === "limit" && !input.price) {
+    throw new Error("submitPerpOrder type=limit requires a price.");
+  }
+
+  // Build the order with keys in the canonical field order (matches the Go
+  // SDK struct order so the server's json.Marshal recomputes the same hash).
+  // omitempty fields are simply not included when the value is undefined.
+  type RawOrder = {
+    clOrdID: string;
+    modifier: number;
+    side: number;
+    type: number;
+    timeInForce: number;
+    price?: string;
+    quantity?: string;
+    funds?: string;
+    reduceOnly: boolean;
+    positionSide: number;
+  };
+  const rawOrder: RawOrder = {
+    clOrdID: input.clOrdID,
+    modifier: SodexOrderModifier.Normal,
+    side: input.side === "buy" ? SodexOrderSide.Buy : SodexOrderSide.Sell,
+    type: input.type === "market" ? SodexOrderType.Market : SodexOrderType.Limit,
+    timeInForce:
+      input.type === "market" ? SodexTimeInForce.IOC : SodexTimeInForce.GTC,
+    ...(input.price !== undefined ? { price: input.price } : {}),
+    ...(input.quantity !== undefined ? { quantity: input.quantity } : {}),
+    ...(input.funds !== undefined ? { funds: input.funds } : {}),
+    reduceOnly: false,
+    positionSide:
+      input.positionSide === "long"
+        ? SodexPositionSide.Long
+        : input.positionSide === "short"
+          ? SodexPositionSide.Short
+          : SodexPositionSide.Both,
+  };
+
+  // NewOrderRequest body (the HTTP body and the params slot of the signing
+  // payload). Field order: accountID, symbolID, orders.
+  const body = {
+    accountID,
+    symbolID,
+    orders: [rawOrder],
+  };
+
+  // Sign the full action envelope: {type: "newOrder", params: <body>}.
+  const { sign, nonce, payload } = await signAction("perps", {
+    type: "newOrder",
+    params: body,
+  });
+  void payload; // referenced for the closure-side completeness; not sent.
+
+  const url = `${testnetGateway("perps")}/trade/orders`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: signedHeaders(sign, nonce),
+    body: JSON.stringify(body),
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    const errBody = await logHttpError(`submitPerpOrder ${input.symbolName}`, res, sign, nonce);
+    throw new Error(
+      `SoDEX submitPerpOrder ${input.symbolName} ${res.status}: ${errBody.slice(0, 200)}`,
+    );
+  }
+
+  const json: unknown = await res.json();
+
+  // Log the raw response shape on first observation; helps when iterating on
+  // payload format. Drops to debug level once we trust the response.
+  logger.info("sodex.submit_response", {
+    symbol: input.symbolName,
+    clOrdID: input.clOrdID,
+    body: JSON.stringify(json).slice(0, 600),
+  });
+
+  // Two layers of error checking:
+  //   1. Envelope-level: top-level {code, error} != 0 means the request was
+  //      malformed (signing wrong, payload broken, etc.). Same for all orders.
+  //   2. Per-order: the data array contains one record per order with its own
+  //      {code, error}. The engine accepts the batch HTTP-wise but rejects
+  //      individual orders for business reasons (insufficient margin, bad
+  //      price, etc.). We must surface these or live.ts treats the rejected
+  //      order as a phantom fill.
+  if (typeof json === "object" && json !== null) {
+    const env = json as Record<string, unknown>;
+    const topCode = env.code;
+    if (typeof topCode === "number" && topCode !== 0) {
+      const message =
+        typeof env.message === "string"
+          ? env.message
+          : typeof env.error === "string"
+            ? env.error
+            : JSON.stringify(env);
+      logger.warn("sodex.submit_envelope_error", {
+        symbol: input.symbolName,
+        code: topCode,
+        message: message.slice(0, 200),
+      });
+      throw new Error(
+        `SoDEX submitPerpOrder ${input.symbolName} rejected: code=${topCode} message=${message.slice(0, 300)}`,
+      );
+    }
+    const data = env.data;
+    if (Array.isArray(data) && data.length > 0) {
+      const first = data[0];
+      if (typeof first === "object" && first !== null) {
+        const perOrder = first as Record<string, unknown>;
+        const perCode = perOrder.code;
+        if (typeof perCode === "number" && perCode !== 0) {
+          const perError =
+            typeof perOrder.error === "string"
+              ? perOrder.error
+              : JSON.stringify(perOrder);
+          logger.warn("sodex.submit_per_order_error", {
+            symbol: input.symbolName,
+            clOrdID: input.clOrdID,
+            code: perCode,
+            error: perError.slice(0, 200),
+          });
+          throw new Error(
+            `SoDEX submitPerpOrder ${input.symbolName} rejected per-order: code=${perCode} ${perError.slice(0, 300)}`,
+          );
+        }
+      }
+    }
+  }
+
+  return {
+    clOrdID: input.clOrdID,
+    sodexOrderId: extractSodexOrderId(json),
+    status: extractInitialStatus(json),
+    raw: json,
+  };
+}
+
+// Submit-response extractors. Live shape observed on 2026-05-28:
+//   {"code":0,"data":[{"code":0,"clOrdID":"sonar-...","orderID":1947090381}]}
+// Earlier docs analysis suggested single-letter codes (`i`, `X`); the live
+// wire uses long names instead, so we check both.
+function extractSodexOrderId(json: unknown): string | null {
+  if (typeof json !== "object" || json === null) return null;
+  const data = (json as Record<string, unknown>).data;
+  if (Array.isArray(data) && data.length > 0) {
+    const first = data[0] as Record<string, unknown>;
+    const live = first.orderID ?? first.i;
+    if (typeof live === "string" || typeof live === "number") return String(live);
+  }
+  if (typeof data === "object" && data !== null) {
+    const single = (data as Record<string, unknown>).orderID ?? (data as Record<string, unknown>).i;
+    if (typeof single === "string" || typeof single === "number") return String(single);
+  }
+  return null;
+}
+
+function extractInitialStatus(json: unknown): SodexOrderSnapshot["X"] {
+  if (typeof json !== "object" || json === null) return "NEW";
+  const data = (json as Record<string, unknown>).data;
+  if (Array.isArray(data) && data.length > 0) {
+    const first = data[0] as Record<string, unknown>;
+    const status = first.status ?? first.X;
+    const parsed = SodexOrderSnapshotSchema.shape.X.safeParse(status);
+    if (parsed.success) return parsed.data;
+  }
+  return "NEW";
+}
+
+// ---------------------------------------------------------------------------
+// Public API: getPerpOrderHistory + helpers
+//
+// IOC market orders (the Wave 2 default for both rebalance legs and hedges)
+// fill within a few hundred milliseconds and the unfilled remainder is
+// canceled, so the order never appears in the open-orders list. We have to
+// reach into orders/history to recover the fill data after the fact. The
+// response carries readable long-name fields (status, executedQty,
+// executedValue) so we use those directly rather than the short codes.
+// ---------------------------------------------------------------------------
+const PerpHistoryOrderSchema = z
+  .object({
+    orderID: z.union([z.string(), z.number()]).optional(),
+    clOrdID: z.string(),
+    symbol: z.string(),
+    side: z.string(),
+    status: z.string(),
+    origQty: z.string().optional(),
+    executedQty: z.string().optional(),
+    executedValue: z.string().optional(),
+    price: z.string().optional(),
+    createdAt: z.number().optional(),
+  })
+  .passthrough();
+export type PerpHistoryOrder = z.infer<typeof PerpHistoryOrderSchema>;
+
+const PerpHistoryEnvelopeSchema = z
+  .object({
+    data: z.array(PerpHistoryOrderSchema),
+  })
+  .passthrough();
+
+export async function getPerpOrderHistory(
+  opts: { symbol?: string; limit?: number } = {},
+): Promise<PerpHistoryOrder[]> {
+  const address = getSignerAddress();
+  const url = new URL(
+    `${testnetGateway("perps")}/accounts/${address}/orders/history`,
+  );
+  if (opts.symbol) url.searchParams.set("symbol", opts.symbol);
+  url.searchParams.set("limit", String(opts.limit ?? 50));
+  const res = await fetch(url, {
+    method: "GET",
+    headers: { Accept: "application/json" },
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`SoDEX getPerpOrderHistory ${res.status}: ${body.slice(0, 200)}`);
+  }
+  const json: unknown = await res.json();
+  const parsed = PerpHistoryEnvelopeSchema.safeParse(json);
+  if (!parsed.success) {
+    throw new Error(
+      `SoDEX getPerpOrderHistory response did not match schema: ${
+        parsed.error.issues[0]?.message ?? "unknown"
+      }`,
+    );
+  }
+  return parsed.data.data;
+}
+
+// Find a specific order by clOrdID, scanning the most recent history page.
+// Sufficient for Wave 2's cadence; if we ever need pagination we can extend.
+export async function findOrderByClOrdID(
+  clOrdID: string,
+  symbol?: string,
+): Promise<PerpHistoryOrder | null> {
+  const history = await getPerpOrderHistory({
+    symbol,
+    limit: 50,
+  });
+  return history.find((o) => o.clOrdID === clOrdID) ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Public API: transferSpotToPerps
+//
+// Signed action that moves an asset balance from the user's spot sub-account
+// to the perps sub-account so perps orders have margin to back them. On
+// testnet the faucet drops vUSDC on spot only; perps starts at zero. Without
+// this step every perps order rejects with `code: -1, error: "insufficient
+// margin"`.
+//
+// Four non-obvious details (confirmed from the SDK trading.md reference; an
+// earlier guess at these values produced `code: -1, error: "toAccountID is
+// invalid"`):
+//   1. Endpoint is owned by the SPOT engine: POST /spot/accounts/transfers.
+//      Not /perps/accounts/transfers, even though the destination is perps.
+//   2. Signing domain is "spot" (SpotDomainName), not "futures". The
+//      direction is encoded in the body's `type` field, not the domain.
+//   3. toAccountID is the magic constant 999, not the user's aid. The 999
+//      is the perps-engine destination address on the spot transfer endpoint.
+//   4. type = 3 (TransferAssetTypePerpsWithdraw) for spot -> perps. The
+//      enum names are from the engine's local frame: this is the spot
+//      engine "withdrawing into perps", hence the seemingly inverted name.
+//
+// Transfer enum (from common/enums/transfer_asset_type.go) for reference:
+//   EVM_DEPOSIT = 0, PERPS_DEPOSIT = 1, EVM_WITHDRAW = 2,
+//   PERPS_WITHDRAW = 3, INTERNAL = 4, SPOT_WITHDRAW = 5, SPOT_DEPOSIT = 6.
+// ---------------------------------------------------------------------------
+const COIN_ID_VUSDC = 0;
+const TRANSFER_TYPE_SPOT_TO_PERPS = 3;
+const PERPS_DESTINATION_ACCOUNT_ID = 999;
+
+export async function transferSpotToPerps(input: {
+  amountUSD: string;       // DecimalString
+}): Promise<{ ok: true; raw: unknown }> {
+  // fromAccountID is the spot aid (which equals the perps aid for this
+  // address per the testnet state probes; reading from the spot side here
+  // for clarity).
+  const fromAccountID = await getAccountId("spot");
+  const toAccountID = PERPS_DESTINATION_ACCOUNT_ID;
+  const transferId = Date.now();
+
+  // Field order matches TransferAssetRequest struct: id, fromAccountID,
+  // toAccountID, coinID, amount, type.
+  const body = {
+    id: transferId,
+    fromAccountID,
+    toAccountID,
+    coinID: COIN_ID_VUSDC,
+    amount: input.amountUSD,
+    type: TRANSFER_TYPE_SPOT_TO_PERPS,
+  };
+
+  // Sign with the spot engine domain (the endpoint is /spot/accounts/transfers).
+  const { sign, nonce, payload } = await signAction("spot", {
+    type: "transferAsset",
+    params: body,
+  });
+  void payload;
+
+  const url = `${testnetGateway("spot")}/accounts/transfers`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: signedHeaders(sign, nonce),
+    body: JSON.stringify(body),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const errBody = await logHttpError("transferSpotToPerps", res, sign, nonce);
+    throw new Error(
+      `SoDEX transferSpotToPerps ${res.status}: ${errBody.slice(0, 200)}`,
+    );
+  }
+  const json: unknown = await res.json();
+  logger.info("sodex.transfer_response", {
+    amount: input.amountUSD,
+    body: JSON.stringify(json).slice(0, 400),
+  });
+  if (typeof json === "object" && json !== null) {
+    const env = json as Record<string, unknown>;
+    if (typeof env.code === "number" && env.code !== 0) {
+      const message =
+        typeof env.message === "string"
+          ? env.message
+          : typeof env.error === "string"
+            ? env.error
+            : JSON.stringify(env);
+      throw new Error(
+        `SoDEX transferSpotToPerps rejected: code=${env.code} ${message.slice(0, 200)}`,
+      );
+    }
+  }
+  return { ok: true, raw: json };
+}
+
+// ---------------------------------------------------------------------------
+// Public API: listPerpOrders (status polling)
+//
+// Reads all open orders for the agent wallet, returning an array of order
+// snapshots. The live executor in lib/sodex/live.ts polls this and matches by
+// clOrdID to find a fill. Unsigned per the SDK pattern (matches /balances and
+// /positions which are also unsigned account reads).
+// ---------------------------------------------------------------------------
+const OrdersEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        orders: z.array(SodexOrderSnapshotSchema).nullable().optional(),
+      })
+      .passthrough(),
+  })
+  .passthrough();
+
+export async function listPerpOrders(): Promise<SodexOrderSnapshot[]> {
+  const address = getSignerAddress();
+  const url = `${testnetGateway("perps")}/accounts/${address}/orders`;
+  const res = await fetch(url, {
+    method: "GET",
+    headers: { Accept: "application/json" },
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`SoDEX listPerpOrders ${res.status}: ${body.slice(0, 200)}`);
+  }
+  const json: unknown = await res.json();
+  const parsed = OrdersEnvelopeSchema.safeParse(json);
+  if (!parsed.success) {
+    throw new Error(
+      `SoDEX listPerpOrders response did not match schema: ${
+        parsed.error.issues[0]?.message ?? "unknown"
+      }`,
+    );
+  }
+  return parsed.data.data.orders ?? [];
 }
