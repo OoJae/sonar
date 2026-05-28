@@ -14,7 +14,9 @@ EnvironmentFile=/root/sonar/.env.local
 # leave the public URL dead during judging week.
 Environment=PORT=3005
 Environment=NODE_ENV=production
-# Resolve pnpm via nvm's bin shim. Update if you move Node versions.
+# pnpm under nvm needs PATH so its node shim resolves. Update both lines on
+# Node version bumps.
+Environment=PATH=/root/.nvm/versions/node/v22.22.2/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart=/root/.nvm/versions/node/v22.22.2/bin/pnpm start
 Restart=always
 RestartSec=5
