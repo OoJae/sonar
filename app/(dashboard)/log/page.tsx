@@ -1,5 +1,6 @@
 import { desc } from "drizzle-orm";
 import { db, schema } from "@/lib/db/client";
+import { traceUrl } from "@/lib/utils/logger";
 import {
   Card,
   CardContent,
@@ -53,9 +54,6 @@ export default async function LogPage() {
           model, data source, and outcome. Drill into a run to read the thesis
           on the Signals page.
         </p>
-        <p className="max-w-2xl text-xs text-muted-foreground/70">
-          Langfuse trace links land in Wave 2.
-        </p>
       </div>
 
       {error ? (
@@ -92,6 +90,7 @@ export default async function LogPage() {
                   <TableHead>Model</TableHead>
                   <TableHead>Data</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Trace</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -124,6 +123,30 @@ export default async function LogPage() {
                         >
                           {run.ok ? "ok" : "failed"}
                         </Badge>
+                      </TableCell>
+                      <TableCell className="mono text-xs">
+                        {run.traceId ? (
+                          (() => {
+                            const url = traceUrl(run.traceId);
+                            return url ? (
+                              <a
+                                href={url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-accent hover:underline"
+                                title={run.traceId}
+                              >
+                                view
+                              </a>
+                            ) : (
+                              <span className="text-muted-foreground" title={run.traceId}>
+                                {run.traceId.slice(0, 8)}
+                              </span>
+                            );
+                          })()
+                        ) : (
+                          <span className="text-muted-foreground/50">-</span>
+                        )}
                       </TableCell>
                     </TableRow>
                   );

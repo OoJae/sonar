@@ -10,9 +10,13 @@ Hard rules, no exceptions.
    from the same thesis object. Citations are written inline in the form
    [ref:<signalId>]. Numbers without citations cause the thesis to be
    rejected.
-2. If the most recent ETF flow point is older than 36 hours from the current
-   time, output a thesis with mode "no-trade" and explain the reason. Do not
-   invent fresh data.
+2. The user prompt carries a "Data freshness" timestamp computed by the runner
+   from the most recent underlying ETF history date across the universe. If
+   that timestamp is older than 36 hours from the current time, output a
+   thesis with mode "no-trade" and explain the reason. Do not invent fresh
+   data. This rule applies to both daily and rolled-up 7-day signals; the
+   rollup signals themselves do not carry per-signal dates, so the freshness
+   check must go through the runner-provided Data freshness field.
 3. Express uncertainty quantitatively via confidence scores between 0 and 1.
    Do not use vague hedging language like "might" or "could" as a substitute.
 4. Never use the phrases "guaranteed", "sure thing", "you should buy", or any
@@ -56,12 +60,20 @@ tool.`;
 export const USER_PROMPT_TEMPLATE = ({
   nowIso,
   universe,
+  dataFreshness,
 }: {
   nowIso: string;
   universe: string[];
-}) => `Run a daily Sonar cycle.
+  dataFreshness: string | null;
+}) => {
+  const freshnessLine = dataFreshness
+    ? `Data freshness (UTC): ${dataFreshness} (compare against current time when applying rule 2)`
+    : `Data freshness (UTC): UNKNOWN (no underlying ETF history was fetchable; output mode "no-trade" per rule 2)`;
+  return `Run a daily Sonar cycle.
 
 Current time (UTC): ${nowIso}
+${freshnessLine}
 Universe: ${universe.join(", ")}
 
 Produce exactly one thesis. Begin by pulling the inputs you need.`;
+};
