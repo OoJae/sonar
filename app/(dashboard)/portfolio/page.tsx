@@ -18,6 +18,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { NavChart, type NavPoint } from "@/components/nav-chart";
+import { BalancePanel } from "@/components/balance-panel";
+import { getAgentBalances } from "@/lib/chain/balances";
 
 export const dynamic = "force-dynamic";
 
@@ -66,6 +68,7 @@ async function load() {
 export default async function PortfolioPage() {
   const { positions, trades, error } = await load();
   const navSeries = await loadNavSeries();
+  const agentBalances = await getAgentBalances();
   const equity = positions.reduce(
     (acc, p) => acc + p.markPrice * p.quantity,
     0,
@@ -105,6 +108,8 @@ export default async function PortfolioPage() {
         />
         <StatCard label="Open positions" value={String(positions.length)} />
       </div>
+
+      <BalancePanel agent={agentBalances} />
 
       <NavSection navSeries={navSeries} />
 
