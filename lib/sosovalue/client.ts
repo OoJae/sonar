@@ -1,4 +1,8 @@
-import "server-only";
+// No `import "server-only"`: this module is imported from scripts/*.ts smoke
+// tests under tsx (scripts/prices-coverage-smoke.ts, scripts/nav-smoke.ts,
+// future Phase 3 work). Same reasoning as lib/db/client.ts, lib/sodex/paper.ts,
+// lib/ssi/reader.ts. None of these functions are safe to bundle into a client
+// component; the boundary is enforced by route-level use.
 import { env } from "@/lib/utils/env";
 import { logger } from "@/lib/utils/logger";
 import { cached, cacheKey, CACHE_TTL } from "./cache";
@@ -7,12 +11,14 @@ import {
   NewsFeaturedResponseSchema,
   EtfSummaryHistoryResponseSchema,
   EtfListResponseSchema,
+  MarketSnapshotResponseSchema,
   SosoEndpoint,
   type CachedResponse,
   type CurrencyListResponse,
   type NewsFeaturedResponse,
   type EtfSummaryHistoryResponse,
   type EtfListResponse,
+  type MarketSnapshotResponse,
 } from "./types";
 import {
   currencyListFixture,
@@ -159,5 +165,37 @@ export function getEtfList(
     ttl: CACHE_TTL.currentEtfDataMetrics,
     schema: EtfListResponseSchema,
     fixture: etfListFixture(symbol),
+  });
+}
+
+// 3.1 Per-currency market snapshot (Wave 2 NAV input). The path interpolates
+// the currency_id, so we can't use the standard readEndpoint helper which
+// expects a static path + query params. Fixtures are intentionally minimal:
+// dev mode without a SoSoValue key returns a price of 1 for everything so
+// the NAV computation degrades gracefully without crashing.
+export async function getCurrencyMarketSnapshot(
+  currency_id: string,
+): Promise<CachedResponse<MarketSnapshotResponse>> {
+  const e = env();
+  const endpoint = SosoEndpoint.CurrencyMarketSnapshot.replace(
+    "{currency_id}",
+    currency_id,
+  );
+  const cacheKeyStr = cacheKey(endpoint, {});
+  if (e.SONAR_DATA_SOURCE === "fixture") {
+    return {
+      data: {
+        code: 0,
+        message: null,
+        data: { price: "1" },
+      },
+      staleAt: new Date(Date.now() + CACHE_TTL.marketSnapshot * 1000),
+      source: "fixture",
+    };
+  }
+  return cached<MarketSnapshotResponse>({
+    key: cacheKeyStr,
+    ttlSeconds: CACHE_TTL.marketSnapshot,
+    fetcher: () => callLive(endpoint, {}, MarketSnapshotResponseSchema),
   });
 }

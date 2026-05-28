@@ -1,4 +1,6 @@
+import { asc } from "drizzle-orm";
 import { getPositions, recentTrades } from "@/lib/sodex/paper";
+import { db, schema } from "@/lib/db/client";
 import {
   Card,
   CardContent,
@@ -15,8 +17,35 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { NavChart, type NavPoint } from "@/components/nav-chart";
 
 export const dynamic = "force-dynamic";
+
+type NavSeries = Record<string, NavPoint[]>;
+
+async function loadNavSeries(): Promise<NavSeries> {
+  try {
+    const rows = await db()
+      .select({
+        index: schema.navSnapshots.index,
+        navPerShareUsd: schema.navSnapshots.navPerShareUsd,
+        asOf: schema.navSnapshots.asOf,
+      })
+      .from(schema.navSnapshots)
+      .orderBy(asc(schema.navSnapshots.asOf));
+    const byIndex: NavSeries = {};
+    for (const r of rows) {
+      const arr = (byIndex[r.index] ??= []);
+      arr.push({
+        asOf: r.asOf.toISOString(),
+        nav: Number(r.navPerShareUsd),
+      });
+    }
+    return byIndex;
+  } catch {
+    return {};
+  }
+}
 
 async function load() {
   try {
@@ -36,6 +65,7 @@ async function load() {
 
 export default async function PortfolioPage() {
   const { positions, trades, error } = await load();
+  const navSeries = await loadNavSeries();
   const equity = positions.reduce(
     (acc, p) => acc + p.markPrice * p.quantity,
     0,
@@ -75,6 +105,8 @@ export default async function PortfolioPage() {
         />
         <StatCard label="Open positions" value={String(positions.length)} />
       </div>
+
+      <NavSection navSeries={navSeries} />
 
       {error ? (
         <Card className="bg-card/70">
@@ -286,4 +318,66 @@ function formatUSD(n: number) {
   if (abs >= 1_000) return `$${(n / 1_000).toFixed(1)}k`;
   if (abs >= 1) return `$${n.toFixed(2)}`;
   return `$${n.toFixed(4)}`;
+}
+
+const INDEX_ORDER = ["MAG7", "DEFI", "MEME", "USSI"] as const;
+
+function NavSection({ navSeries }: { navSeries: NavSeries }) {
+  const haveAny = INDEX_ORDER.some((idx) => (navSeries[idx]?.length ?? 0) > 0);
+  return (
+    <Card className="bg-card/70">
+      <CardHeader>
+        <CardTitle className="text-base">NAV per share</CardTitle>
+        <CardDescription>
+          Computed off-chain from each SSI index tokenset and live SoSoValue
+          prices. Dotted line marks inception. Each agent cycle adds a snapshot.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {!haveAny ? (
+          <div className="mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+            No NAV snapshots yet. Trigger an agent cycle (POST /api/agent/run)
+            or wait for the daily cron.
+          </div>
+        ) : (
+          <div className="grid gap-6 lg:grid-cols-2">
+            {INDEX_ORDER.map((idx) => {
+              const points = navSeries[idx] ?? [];
+              if (points.length === 0) return null;
+              const latest = points[points.length - 1]?.nav ?? 0;
+              const inception = points[0]?.nav ?? 0;
+              const deltaPct =
+                inception !== 0 ? ((latest - inception) / inception) * 100 : 0;
+              return (
+                <div
+                  key={idx}
+                  className="rounded-md border border-border/60 bg-card/40 p-4"
+                >
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+                      {idx}.ssi
+                    </span>
+                    <span className="mono text-xs">
+                      ${latest.toFixed(latest >= 1 ? 2 : 4)}
+                      <span
+                        className={`ml-2 ${
+                          deltaPct >= 0
+                            ? "text-[color:var(--positive)]"
+                            : "text-[color:var(--negative)]"
+                        }`}
+                      >
+                        {deltaPct >= 0 ? "+" : ""}
+                        {deltaPct.toFixed(2)}%
+                      </span>
+                    </span>
+                  </div>
+                  <NavChart data={points} label={idx} />
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
 }

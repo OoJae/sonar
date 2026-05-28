@@ -127,8 +127,28 @@ export const SosoEndpoint = {
   NewsFeatured: "/openapi/v1/news/featured",
   EtfList: "/openapi/v1/etfs",
   EtfSummaryHistory: "/openapi/v1/etfs/summary-history",
+  // Path template; currency_id is interpolated at call time.
+  CurrencyMarketSnapshot: "/openapi/v1/currencies/{currency_id}/market-snapshot",
 } as const;
 export type SosoEndpointName = keyof typeof SosoEndpoint;
+
+// --- Currency market snapshot ----------------------------------------------
+// All numeric fields arrive as decimal strings; the price is what Wave 2 reads
+// for NAV computation, the others passthrough.
+export const MarketSnapshotSchema = z
+  .object({
+    price: z.union([z.string(), z.number()]).optional(),
+    change_pct_24h: z.union([z.string(), z.number()]).nullable().optional(),
+    marketcap: z.union([z.string(), z.number()]).nullable().optional(),
+    circulating_supply: z.union([z.string(), z.number()]).nullable().optional(),
+    high_24h: z.union([z.string(), z.number()]).nullable().optional(),
+    low_24h: z.union([z.string(), z.number()]).nullable().optional(),
+  })
+  .passthrough();
+export type MarketSnapshot = z.infer<typeof MarketSnapshotSchema>;
+
+export const MarketSnapshotResponseSchema = Envelope(MarketSnapshotSchema);
+export type MarketSnapshotResponse = z.infer<typeof MarketSnapshotResponseSchema>;
 
 export type CachedResponse<T> = {
   data: T;

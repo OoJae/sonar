@@ -150,4 +150,7 @@ export const CACHE_TTL = {
   newsFeaturedCurrency: 15 * 60,
   historicalInflowChart: 6 * 60 * 60,
   currentEtfDataMetrics: 60 * 60,
+  // 5 minutes is enough that one cron cycle prices all 27 tokens fresh and
+  // intra-day re-renders hit cache. Well under the 100 rpm budget.
+  marketSnapshot: 5 * 60,
 } as const;

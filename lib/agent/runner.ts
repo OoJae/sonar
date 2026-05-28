@@ -13,6 +13,7 @@ import { ThesisSchema, type Thesis, type UniverseKey } from "./thesis";
 // live-mainnet switching is governed by SONAR_EXECUTION_MODE; the runner
 // stays the same regardless. See lib/sodex/executor.ts for the routing rules.
 import { placeOrder, getPositions } from "@/lib/sodex/executor";
+import { computeAllNavs } from "@/lib/ssi/nav";
 
 // Xiaomi MiMo V2.5 Pro via its Anthropic-compatible endpoint. The @ai-sdk/
 // anthropic package handles the Messages API + tool calls; we just override
@@ -97,6 +98,15 @@ export async function runAgentCycle(opts?: {
     capture.thesis = { ...capture.thesis, id: randomUUID() };
 
     await persistThesis(runId, capture.thesis);
+    // NAV snapshot per index per cycle. Runs regardless of trade/no-trade
+    // mode so the Portfolio chart picks up timepoints even on freshness
+    // skips. Failure is non-fatal: a stale snapshot is preferable to a
+    // failed cycle. See lib/ssi/nav.ts.
+    await persistNavSnapshots().catch((err) =>
+      logger.warn("agent.nav_persist_failed", {
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
 
     if (capture.thesis.mode === "trade") {
       await executeAllocations(capture.thesis);
@@ -174,6 +184,18 @@ async function persistThesis(runId: string, thesis: Thesis): Promise<void> {
   if (signalRows.length > 0) {
     await db().insert(schema.signals).values(signalRows);
   }
+}
+
+async function persistNavSnapshots(): Promise<void> {
+  const navs = await computeAllNavs();
+  if (navs.length === 0) return;
+  await db().insert(schema.navSnapshots).values(
+    navs.map((n) => ({
+      index: n.index,
+      navPerShareUsd: String(n.navPerShareUSD),
+      asOf: new Date(n.asOf),
+    })),
+  );
 }
 
 // Wave 1 paper book sizing. The thesis declares targetWeight; the runner is
