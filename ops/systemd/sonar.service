@@ -1,0 +1,30 @@
+[Unit]
+Description=Sonar - ETF-flow-aware agentic hedge fund (Next.js)
+Documentation=https://github.com/OoJae/sonar
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/sonar
+EnvironmentFile=/root/sonar/.env.local
+# PORT must match the upstream nginx proxy_pass (127.0.0.1:3005). Restart
+# semantics: always restart with a short backoff so a single crash does not
+# leave the public URL dead during judging week.
+Environment=PORT=3005
+Environment=NODE_ENV=production
+# Resolve pnpm via nvm's bin shim. Update if you move Node versions.
+ExecStart=/root/.nvm/versions/node/v22.22.2/bin/pnpm start
+Restart=always
+RestartSec=5
+# Capture stdout/stderr into the systemd journal; `journalctl -u sonar -f`
+# tails live logs without needing a separate log file path.
+StandardOutput=journal
+StandardError=journal
+# Wait up to 60s for graceful shutdown so an in-flight agent cycle (which
+# can run 30-60s) does not get killed mid-fill on a `systemctl restart`.
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target
