@@ -38,11 +38,63 @@ const EnvShape = z.object({
   BASE_RPC_URL: z.string().url().default("https://mainnet.base.org"),
   VALUECHAIN_RPC_URL: z.string().url().default("https://rpc.valuechain.xyz"),
 
-  // SoDEX live client (optional in Wave 1, used for spot pair listing)
+  // SoDEX live client (Wave 1: spot pair listing only). Mainnet API-key name.
+  // Testnet uses SODEX_WALLET_PRIVATE_KEY directly per docs/sodex-live.md §1.
   SODEX_API_KEY: z.string().min(1).optional(),
   SODEX_BASE_URL: z.string().url().default("https://api.sodex.com"),
 
-  // Langfuse observability (optional; logger noops if absent)
+  // Wave 2 execution: mode + risk caps + testnet auth.
+  SONAR_EXECUTION_MODE: z
+    .enum(["paper", "live-testnet", "live-mainnet"])
+    .default("paper"),
+  SONAR_ALLOW_MAINNET: z
+    .enum(["true", "false"])
+    .optional()
+    .transform((v) => v === "true"),
+  SONAR_REQUIRE_MANUAL_APPROVAL: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((v) => v === "true"),
+  SONAR_MAX_NOTIONAL_PER_ORDER: z.coerce.number().positive().default(500),
+  SONAR_MAX_NOTIONAL_PER_CYCLE: z.coerce.number().positive().default(2000),
+  SODEX_TESTNET_BASE_URL: z
+    .string()
+    .url()
+    .default("https://testnet-gw.sodex.dev/api/v1"),
+  SODEX_API_SECRET: z.string().min(1).optional(),
+  // Hex-encoded 32-byte private key (0x + 64 hex chars). Server-side only.
+  // Used by viem privateKeyToAccount() for EIP-712 SoDEX signing. Never log.
+  SODEX_WALLET_PRIVATE_KEY: z
+    .string()
+    .regex(/^0x[0-9a-fA-F]{64}$/, {
+      message:
+        "SODEX_WALLET_PRIVATE_KEY must be a 0x-prefixed 32-byte hex string",
+    })
+    .optional(),
+
+  // Wave 2 cross-chain: USDC contract addresses + Mirror Protocol bridge.
+  // Base mainnet USDC default is Circle's well-known address. ValueChain
+  // testnet USDC and the bridge contracts are UNCONFIRMED pending Discord
+  // (see docs/mirror-bridge.md).
+  BASE_USDC_ADDRESS: z
+    .string()
+    .regex(/^0x[0-9a-fA-F]{40}$/)
+    .default("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"),
+  VALUECHAIN_USDC_ADDRESS: z
+    .string()
+    .regex(/^0x[0-9a-fA-F]{40}$/)
+    .optional(),
+  MIRROR_BRIDGE_BASE_ADDRESS: z
+    .string()
+    .regex(/^0x[0-9a-fA-F]{40}$/)
+    .optional(),
+  MIRROR_BRIDGE_VALUECHAIN_ADDRESS: z
+    .string()
+    .regex(/^0x[0-9a-fA-F]{40}$/)
+    .optional(),
+  NEXT_PUBLIC_WALLETCONNECT_ID: z.string().min(1).optional(),
+
+  // Langfuse observability (Wave 2 traces; logger noops if absent).
   LANGFUSE_PUBLIC_KEY: z.string().min(1).optional(),
   LANGFUSE_SECRET_KEY: z.string().min(1).optional(),
   LANGFUSE_BASE_URL: z.string().url().default("https://cloud.langfuse.com"),
@@ -51,11 +103,10 @@ const EnvShape = z.object({
   CRON_SECRET: z.string().min(1).optional(),
 });
 
-// Production hardening: refuse to boot if CRON_SECRET is unset in production.
-// Without the secret, the cron and manual-run endpoints would be open to the
-// public internet. Dev mode is unaffected so local cycles still work without
-// a token.
+// Production hardening + Wave 2 execution gates.
 const EnvSchema = EnvShape.superRefine((cfg, ctx) => {
+  // CRON_SECRET is mandatory in production so the cron and manual-run endpoints
+  // are not open to the public internet. Dev mode is unaffected.
   if (cfg.NODE_ENV === "production" && !cfg.CRON_SECRET) {
     ctx.addIssue({
       code: "custom",
@@ -63,6 +114,41 @@ const EnvSchema = EnvShape.superRefine((cfg, ctx) => {
       message:
         "CRON_SECRET is required in production to gate /api/cron/daily and /api/agent/run",
     });
+  }
+
+  // Any live execution mode requires the testnet hot wallet key so we can sign
+  // SoDEX EIP-712 payloads. Catching this at boot prevents a runtime panic on
+  // the first order attempt.
+  if (
+    cfg.SONAR_EXECUTION_MODE.startsWith("live") &&
+    !cfg.SODEX_WALLET_PRIVATE_KEY
+  ) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["SODEX_WALLET_PRIVATE_KEY"],
+      message: `SODEX_WALLET_PRIVATE_KEY is required when SONAR_EXECUTION_MODE=${cfg.SONAR_EXECUTION_MODE}`,
+    });
+  }
+
+  // Mainnet is gated behind a second explicit opt-in plus forced manual approval.
+  // See docs/sodex-live.md §0 and CLAUDE-WAVE2.md §3.5.
+  if (cfg.SONAR_EXECUTION_MODE === "live-mainnet") {
+    if (!cfg.SONAR_ALLOW_MAINNET) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["SONAR_ALLOW_MAINNET"],
+        message:
+          "SONAR_ALLOW_MAINNET must be \"true\" when SONAR_EXECUTION_MODE=live-mainnet (mainnet uses real funds)",
+      });
+    }
+    if (!cfg.SONAR_REQUIRE_MANUAL_APPROVAL) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["SONAR_REQUIRE_MANUAL_APPROVAL"],
+        message:
+          "SONAR_REQUIRE_MANUAL_APPROVAL must be \"true\" on live-mainnet (forced manual approval is mandatory)",
+      });
+    }
   }
 });
 

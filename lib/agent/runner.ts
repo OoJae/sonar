@@ -9,7 +9,10 @@ import { db, schema } from "@/lib/db/client";
 import { SYSTEM_PROMPT, USER_PROMPT_TEMPLATE } from "./prompts";
 import { buildAgentTools } from "./tools";
 import { ThesisSchema, type Thesis, type UniverseKey } from "./thesis";
-import { placeOrder, getPositions } from "@/lib/sodex/paper";
+// All execution routes through the executor facade. Paper / live-testnet /
+// live-mainnet switching is governed by SONAR_EXECUTION_MODE; the runner
+// stays the same regardless. See lib/sodex/executor.ts for the routing rules.
+import { placeOrder, getPositions } from "@/lib/sodex/executor";
 
 // Xiaomi MiMo V2.5 Pro via its Anthropic-compatible endpoint. The @ai-sdk/
 // anthropic package handles the Messages API + tool calls; we just override

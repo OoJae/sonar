@@ -47,5 +47,6 @@ next-env.d.ts
 # internal dev artifacts (not for public repo)
 CLAUDE.md
 AGENTS.md
+sonar-wave2-build-playbook.md
 .githooks/
 scripts/lint-prose.sh
