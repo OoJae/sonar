@@ -26,7 +26,6 @@ import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { keccak256, stringToBytes } from "viem";
 import { db, schema } from "@/lib/db/client";
-import { env } from "@/lib/utils/env";
 import { logger } from "@/lib/utils/logger";
 import { resolveMarket } from "./markets";
 import {
@@ -34,6 +33,13 @@ import {
   listPerpOrders,
   submitPerpOrder,
 } from "./client";
+import {
+  assertModeAllowed,
+  enforcePerCycleCap,
+  enforcePerOrderCap,
+  isDust,
+  recordPlaced,
+} from "./risk";
 import { mapSodexStatus } from "./types";
 import type {
   ExecutedTrade,
@@ -47,11 +53,6 @@ const POLL_MULTIPLIER = 1.5;
 const POLL_CAP_MS = 5000;
 const POLL_TIMEOUT_MS = 30_000;
 
-// Per-process cycle accumulator. Resets every `runId` first seen; the runner
-// gives each cycle a fresh runId so the cap correctly resets between cycles.
-// Phase 2.3 moves this into lib/sodex/risk.ts.
-const cycleNotionalSpent = new Map<string, number>();
-
 function clientOrderId(thesisId: string, market: string): string {
   // Deterministic 24-char alphanumeric+dash key. SoDEX testnet rejects the
   // bare keccak hex ("0x..." format) with `code: -1, error: clOrdID is
@@ -60,30 +61,6 @@ function clientOrderId(thesisId: string, market: string): string {
   // clOrdID conventions, and stays well under any reasonable length cap.
   const hash = keccak256(stringToBytes(`${thesisId}:${market}`));
   return `sonar-${hash.slice(2, 18)}`;
-}
-
-function applyPerOrderCap(requested: number): {
-  capped: number;
-  downsized: boolean;
-} {
-  const cap = env().SONAR_MAX_NOTIONAL_PER_ORDER;
-  if (requested > cap) return { capped: cap, downsized: true };
-  return { capped: requested, downsized: false };
-}
-
-function applyPerCycleCap(
-  runId: string,
-  requested: number,
-): { allow: boolean; reason?: string } {
-  const cap = env().SONAR_MAX_NOTIONAL_PER_CYCLE;
-  const spent = cycleNotionalSpent.get(runId) ?? 0;
-  if (spent + requested > cap) {
-    return {
-      allow: false,
-      reason: `per-cycle cap ($${cap}) would be exceeded: already spent $${spent}, requested $${requested}`,
-    };
-  }
-  return { allow: true };
 }
 
 // Look up the current cycle's runId for the in-process cap accumulator.
@@ -153,9 +130,18 @@ export async function placeOrder(req: OrderRequest): Promise<ExecutedTrade> {
     // through to attempt submission again under the same clOrdID.
   }
 
-  // Cap checks. Phase 2.3 turns these into lib/sodex/risk.ts.
-  const { capped, downsized } = applyPerOrderCap(req.notionalUSD);
-  const cycleCheck = applyPerCycleCap(runId, capped);
+  // Risk gate: mode + dust + per-order cap + per-cycle cap. Order matters:
+  // assertModeAllowed first (catches misconfiguration before any DB work),
+  // then dust, then per-order downsizing, then per-cycle cap check against
+  // the (possibly downsized) notional.
+  assertModeAllowed();
+  if (isDust(req.notionalUSD)) {
+    throw new Error(
+      `Order notional $${req.notionalUSD} for ${req.market} is below the dust floor; the runner should drop these before reaching the executor.`,
+    );
+  }
+  const { notionalUSD: capped } = enforcePerOrderCap(req.notionalUSD);
+  const cycleCheck = enforcePerCycleCap(runId, capped);
   if (!cycleCheck.allow) {
     const id = await insertOrderRow({
       clOrdID,
@@ -166,17 +152,10 @@ export async function placeOrder(req: OrderRequest): Promise<ExecutedTrade> {
       side: req.side,
       notionalUSD: capped,
       status: "rejected",
-      rejectionReason: cycleCheck.reason ?? "per-cycle cap exceeded",
+      rejectionReason: cycleCheck.reason,
     });
     void id;
     throw new Error(`Order rejected by risk gate: ${cycleCheck.reason}`);
-  }
-  if (downsized) {
-    logger.info("live.notional_downsized", {
-      market: req.market,
-      requested: req.notionalUSD,
-      capped,
-    });
   }
 
   // Insert as pending; the UNIQUE constraint on client_order_id is the DB-level
@@ -224,8 +203,9 @@ export async function placeOrder(req: OrderRequest): Promise<ExecutedTrade> {
     })
     .where(eq(schema.orders.id, orderRowId));
 
-  // Count against the per-cycle cap only after submission succeeded.
-  cycleNotionalSpent.set(runId, (cycleNotionalSpent.get(runId) ?? 0) + capped);
+  // Count against the per-cycle cap only after submission succeeded so that
+  // rejected orders do not consume budget.
+  recordPlaced(runId, capped);
 
   // Poll for terminal status. The SoDEX response on submit usually gives
   // the initial status (NEW); we poll the open-orders listing to detect
@@ -542,12 +522,5 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// Phase 2.3 needs visibility into the cycle-cap accumulator from outside.
-// Exported so the new risk module can read or reset state cleanly without
-// reaching into private state. Will be moved into lib/sodex/risk.ts in 2.3.
-export function _cycleAccumulator() {
-  return cycleNotionalSpent;
-}
-
-// Re-export the placeholder helper if needed by tests.
+// Re-export drizzle's and() placeholder if needed by tests downstream.
 void and;
