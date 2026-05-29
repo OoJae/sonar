@@ -31,10 +31,91 @@
 - Record demo video (max 3 minutes)
 - Optional: deploy to Vercel and publish live URL
 
-## Wave 2 (June 2026, planned)
-- Live SoDEX execution on ValueChain (paper-to-live swap in `lib/sodex/`)
-- Cross-chain bridging logic between Base and ValueChain via Mirror Protocol
-- Production risk engine (VaR, drawdown caps, correlation limits)
-- Custom SSI index proposals
-- Mobile UX polish
-- Full Langfuse tracing with thesis annotations and cost breakdown
+## Wave 2 (May 26 to June 7, 2026)
+
+### Shipped
+
+**Live SoDEX testnet execution (the headline).**
+- EIP-712 signed orders via viem `signTypedData`. Three SoDEX-specific
+  protocol details discovered and documented in `docs/sodex-live.md`: the
+  v-byte recovery normalization (viem returns 27/28, the engine expects
+  0/1); the clOrdID format constraint (raw keccak hex is rejected, must
+  match a `sonar-<16 hex>` alphanumeric pattern); the two-layer error
+  envelope (top-level `code` AND per-order `data[*].code`).
+- `lib/sodex/executor.ts` routes `placeOrder` by `SONAR_EXECUTION_MODE`.
+  Paper mode unchanged. Live-testnet places real signed orders. SSI
+  primitives (MAG7.ssi etc.) route to paper even in live mode because
+  they are not SoDEX listings; perp hedges fire live.
+- `lib/sodex/live.ts` implements the full flow: deterministic clOrdID,
+  pending row insert, risk gate, signed submit, poll open orders, fall
+  back to orders-history for IOC fills, reuse the Wave 1 position
+  tracking. Real BTC-PERP and SOL-PERP fills recorded on testnet
+  (sodexOrderId surfaces on /signals via the order preview UI).
+- `lib/sodex/risk.ts`: dust floor, per-order cap (downsizes), per-cycle
+  cap (blocks). Mode gate refuses live-mainnet defence-in-depth even past
+  the env boot guard. 16/16 risk smoke (`scripts/sodex-risk-smoke.ts`).
+- `lib/sodex/client.ts` also exposes the spot-to-perps transferAsset
+  signed action (`transferSpotToPerps`) because testnet faucets fund spot
+  only; `scripts/sodex-fund-perps.ts` is the one-shot helper.
+
+**NAV computation.**
+- `lib/prices/`: SoSoValue per-currency market snapshot wrapper with the
+  symbol-to-currency-id resolver. Pre-prep B3 verified 27/27 underlying
+  token coverage; no fallback price source needed.
+- `lib/ssi/nav.ts`: per-share NAV from on-chain tokenset times USD prices.
+  Wave 1 reference prices in `lib/sodex/paper.ts` were placeholders; real
+  per-share NAVs are sub-dollar (each share holds a tiny fractional
+  position in each underlying). Hand-verified via the BTC backing math
+  in `scripts/nav-smoke.ts`.
+- `nav_snapshots` rows persist per index per cycle. `components/nav-chart.tsx`
+  is a pure-SVG line chart per index (reuses the Recharts-replacement
+  pattern from Wave 1) with a dashed inception reference line. Latest
+  NAV and percentage-from-inception render in the per-index header.
+
+**Freshness rollup fix.**
+- `lib/agent/runner.ts:fetchDataFreshness` pre-fetches the most recent ETF
+  history date across BTC, ETH, SOL before invoking the model and injects
+  a "Data freshness (UTC)" line into the user prompt.
+- Prompt rule #2 rewritten in `lib/agent/prompts.ts` to grade against the
+  injected field rather than per-signal dates, closing the round 7 gap
+  where 7-day rollup signals could not be freshness-checked.
+
+**Langfuse cycle traces.**
+- `lib/utils/logger.ts:startCycleTrace` opens a real Langfuse trace keyed
+  by runId so /log row anchors and trace URLs match. Per-cycle output
+  (thesis id, mode, headline snippet, signal counts) flushed on success;
+  errors flushed on failure.
+- /log restored the Trace column dropped in round 9, linking each row to
+  `${LANGFUSE_BASE_URL}/trace/{trace_id}`.
+
+**Cross-chain awareness.**
+- `lib/chain/balances.ts` reads the agent hot wallet's Base USDC balance
+  server-side. ValueChain testnet USDC awaits the Mirror Protocol
+  contract address answer (see `docs/mirror-bridge.md` open question).
+- `app/providers.tsx` ships wagmi v2 + ConnectKit + React Query with Base
+  + ValueChain testnet (chainId 138565, RPC https://testnet-rpc.valuechain.xyz
+  discovered by probe) so the user can connect to read their own USDC on
+  Base and native gas on ValueChain testnet.
+- `components/balance-panel.tsx` mounts on /portfolio with both wallets
+  side by side and the ConnectKit button inline.
+
+**Operational hardening.**
+- `ops/systemd/sonar.service` runs the production build under systemd
+  (Restart=always, 5s backoff, 60s graceful stop, journal logging,
+  EnvironmentFile=.env.local, PATH includes nvm bin so pnpm finds node).
+- `ops/nginx/sonar.conf` commits the nginx vhost (TLS via certbot, 300s
+  read/send timeouts for in-flight agent cycles). Install + transition
+  verified end to end; https://sonar.my.id survives `systemctl restart`.
+
+### Carried forward to Wave 3
+
+- Mirror Protocol bridge widget (5.2 in the plan). UI and Phase 5.1 wallet
+  stack are in place; the actual bridge call lights up the moment Discord
+  confirms the testnet contract addresses (see `docs/mirror-bridge.md`).
+- Production risk engine (VaR, drawdown caps, correlation limits). Wave 2
+  ships flat notional caps only.
+- Custom SSI index proposals.
+- Scoped session-key delegation (Wave 2 uses a server-side hot wallet for
+  the executor; the user-facing wallet connect is read-only on Wave 2).
+- Public read-only landing for non-wallet visitors.
+- Mobile UX polish.

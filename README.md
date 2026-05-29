@@ -8,8 +8,11 @@ Sonar ingests SoSoValue's daily ETF flow data and structured news after every US
 market close, has an AI agent (Xiaomi MiMo V2.5 Pro) write a dated research
 thesis with inline citations, reads the SSI Protocol indices on Base for live
 composition, and rebalances a paper book across MAG7.ssi, DEFI.ssi, and
-MEME.ssi. Wave 1 is paper trading with a fully transparent decision log.
-Wave 2 takes execution live through SoDEX on ValueChain.
+MEME.ssi. **Wave 2 turns perp hedges live on SoDEX testnet** with EIP-712
+signed orders, deterministic-clOrdID idempotency, a risk gate that downsizes
+and blocks per cap, a per-share NAV chart computed from live on-chain
+tokensets and SoSoValue prices, and Langfuse traces linked from the
+decision log.
 
 
 ---
@@ -22,10 +25,10 @@ operators, agents whose reasoning is never published. Sonar is the answer to
 that, and it is the only Wave 1 entry that uses the full SoSoValue vertical
 stack end to end:
 
-- **SoSoValue Terminal** for the data signals (ETF flows, news)
-- **SSI Protocol** indices on Base for composition and exposure
-- **SoDEX** order shape for paper trades today, live execution in Wave 2
-- **ValueChain** as the execution venue (Wave 2 bridge)
+- **SoSoValue Terminal** for the data signals (ETF flows, news, per-currency prices for NAV)
+- **SSI Protocol** indices on Base for composition and per-share NAV
+- **SoDEX** testnet perps for the agent's hedges (Wave 2 live; EIP-712 signed)
+- **ValueChain** testnet as the execution venue and second balance surface
 
 Every trade has a thesis. Every numeric claim in the thesis cites a signal id.
 The agent is non-custodial by design (Wave 2 acts via scoped session approvals,
@@ -38,16 +41,23 @@ never custody). The decision log shows rejected theses next to accepted ones.
 | Capability | How |
 |---|---|
 | Pulls ETF flows + news on a daily cadence | SoSoValue REST client with Upstash Redis token-bucket (100 rpm, High Frequency tier) |
-| Generates a dated, sourced research thesis | MiMo V2.5 Pro via the Anthropic-compatible relay, 8-step tool loop in [lib/agent/runner.ts](lib/agent/runner.ts) |
+| Generates a dated, sourced research thesis | MiMo V2.5 Pro via the Anthropic-compatible relay, 16-step tool loop in [lib/agent/runner.ts](lib/agent/runner.ts) |
 | Enforces citations on every numeric claim | Zod schema with `superRefine` in [lib/agent/thesis.ts](lib/agent/thesis.ts) |
 | Reads SSI index composition on Base | viem multicall against the live `getTokenset()` ABI in [lib/ssi/reader.ts](lib/ssi/reader.ts) |
-| Paper-trades into MAG7 / DEFI / MEME | Drizzle-backed engine in [lib/sodex/paper.ts](lib/sodex/paper.ts) shaped like a future SoDEX order |
-| Refuses to act on stale data | 36-hour freshness rule baked into the system prompt |
+| Computes per-share NAV from on-chain composition | [lib/ssi/nav.ts](lib/ssi/nav.ts) prices each token via [lib/prices/](lib/prices/) against SoSoValue's market-snapshot endpoint |
+| Charts NAV vs inception on /portfolio | Pure-SVG line chart in [components/nav-chart.tsx](components/nav-chart.tsx); snapshots persist per index per cycle |
+| Places signed perp orders on SoDEX testnet | EIP-712 typed-data signing via viem in [lib/sodex/client.ts](lib/sodex/client.ts); idempotent client-order-id and risk-gate caps in [lib/sodex/live.ts](lib/sodex/live.ts) and [lib/sodex/risk.ts](lib/sodex/risk.ts) |
+| Surfaces every wire-side order | Per-thesis order preview block on /signals with status badges (pending, submitted, filled, rejected) and the SoDEX system order id |
+| Lets the user read their cross-chain balances | wagmi v2 + ConnectKit wallet panel in [components/balance-panel.tsx](components/balance-panel.tsx); Base USDC + ValueChain testnet native gas |
+| Publishes per-cycle traces | Real Langfuse trace per run, linked from /log |
+| Refuses to act on stale data | Runner pre-fetches a `dataFreshness` value before the cycle and injects it into the prompt; rule #2 grades against the injected field |
 | Surfaces every decision | Three-page dashboard: Signals, Portfolio, Log |
 
-A live cycle on 2026-05-04 ingested 11 signals, produced a `mode = trade`
-thesis, and persisted three paper trades (MAG7 +$35k, DEFI +$20k, MEME +$11.5k)
-with mark-to-market positions in Postgres.
+A live cycle in Wave 2 (runId `b9e5ed8f`) produced three paper SSI trades
+and one signed SOL-PERP fill on SoDEX testnet, with the agent's $50k hedge
+notional downsized to $500 by the risk gate. SOL-USD position 2533914 is
+open at the testnet at $82.65 entry. BTC-USD position from the
+idempotency smoke is open at $73,700.
 
 ---
 
@@ -57,8 +67,10 @@ Two chains, one agent.
 
 - **Base (chainId 8453)** holds the SSI indices. Sonar reads composition and
   total supply via viem multicall against the SSI Asset Token contracts.
-- **ValueChain (chainId 286623)** hosts SoDEX execution. Wave 1 paper trades
-  match the shape of live SoDEX orders so the Wave 2 swap is a one-file change.
+- **ValueChain (chainId 286623 mainnet, 138565 testnet)** hosts SoDEX
+  execution. Wave 2 places EIP-712 signed perp orders on testnet through
+  the executor facade; the kill switch is one env var
+  (`SONAR_EXECUTION_MODE=paper`).
 
 ```
                   21:30 UTC weekdays (post US ETF close)
@@ -71,28 +83,36 @@ Two chains, one agent.
                                   |
                                   v
                 runAgentCycle  (lib/agent/runner.ts)
-                  |             |              |
-                  v             v              v
-           SoSoValue       SSI reader     Paper engine
-           REST client     (viem on        (Drizzle on
-           (Redis cache    Base mainnet)   Postgres)
-            + 100 rpm)
-                  |             |              |
-                  +------+------+--------+-----+
-                         |               |
-                         v               v
-                  MiMo V2.5 Pro    Thesis validator
-                  (8-step loop)    (Zod superRefine,
-                                    citations enforced)
-                         |
-                         v
-                   Persist thesis,
-                   place paper orders,
-                   mark to market
-                         |
-                         v
-                   Dashboard
-                   (Signals, Portfolio, Log)
+                  |             |              |             |
+                  v             v              v             v
+           SoSoValue       SSI reader     Executor       Langfuse
+           REST client     + nav.ts       facade         trace
+           (Redis cache    (viem on       (paper or
+            + 100 rpm)     Base mainnet)   live testnet)
+                  |             |              |             |
+                  +------+------+--------+-----+             |
+                         |               |                   |
+                         v               v                   |
+                  MiMo V2.5 Pro    Thesis validator           |
+                  (16-step loop)   (Zod superRefine,          |
+                                    citations enforced)      |
+                         |                                    |
+                         v                                    |
+                   Persist thesis,                            |
+                   compute NAV snapshot,                      |
+                   place orders (paper or                     |
+                   EIP-712 signed via SoDEX                   |
+                   testnet through risk gate),               |
+                   mark to market                            |
+                         |                                    |
+                         +---------------> trace.update() ----+
+                         |                                    |
+                         v                                    v
+                   Dashboard                            Langfuse
+                   (Signals + order preview,            cloud
+                    Portfolio + NAV chart +             (trace links
+                    cross-chain balances,                from /log)
+                    Log + Trace column)
 ```
 
 For the longer write-up see [docs/architecture.md](docs/architecture.md).
@@ -115,7 +135,9 @@ For the longer write-up see [docs/architecture.md](docs/architecture.md).
 | Validation | Zod | 4.3.6 |
 | Styling | Tailwind v4 + shadcn/ui (base-nova preset) | 4.x |
 | Charts | Custom SVG (Recharts retained as a dep) | n/a |
-| Observability | Langfuse-ready logger | wired, not yet connected |
+| Observability | Langfuse cycle traces | `langfuse` 3.x |
+| Wallet stack (Wave 2) | wagmi + ConnectKit + React Query | wagmi 2.x, connectkit 1.x |
+| Process supervisor | systemd (`ops/systemd/sonar.service`) | n/a |
 
 ---
 
@@ -275,27 +297,55 @@ recent US ETF close is more than 36 hours stale.
 
 ## Wave 1 vs Wave 2
 
-**Wave 1 (this repo).**
+**Wave 1.**
 
 - SoSoValue REST client with Redis cache + 100 rpm token bucket
 - MiMo V2.5 Pro agent runner with citation-enforced theses
-- SSI Protocol on-chain reader (composition only)
+- SSI Protocol on-chain reader (composition)
 - Drizzle-backed paper trading engine with mark-to-market
 - Three dashboards: Signals, Portfolio, Log
 - MCP server stubs for SoSoValue, SSI, SoDEX
 - Cron-driven daily cycle (21:30 UTC weekdays, post US ETF close)
 - Apache 2.0 license
 
-**Wave 2 (planned).**
+**Wave 2 (shipped).**
 
-- Live SoDEX execution (one-file swap from `paper.ts` to `client.ts`)
-- ValueChain bridging from Base
-- Risk engine: VaR, drawdown caps, correlation limits
-- SSI NAV computation via oracle (sum of `amount * priceUSD` per share)
-- Custom SSI index proposals
-- Production observability and alerting (Langfuse + Discord)
+- **Live SoDEX testnet execution.** EIP-712 signed orders via viem; the
+  executor facade routes paper/live-testnet/live-mainnet by env. SSI
+  primitives route to paper even in live mode (they are not SoDEX
+  listings); perp hedges fire live with deterministic clOrdID for
+  idempotency. Five non-obvious protocol details discovered and
+  documented in `docs/sodex-live.md`.
+- **Risk gate.** Per-order downsize, per-cycle cap, dust floor, mode
+  gate. 16/16 standalone smoke (`scripts/sodex-risk-smoke.ts`). Surfaces
+  rejection reasons on /signals next to the order status badge.
+- **NAV computation.** Off-chain sum of `amount * priceUSD` per share.
+  Per-currency prices via SoSoValue's market-snapshot endpoint.
+  `nav_snapshots` persist per cycle. Pure-SVG line chart on /portfolio
+  with a dashed inception reference. 27/27 underlying tokens covered.
+- **Freshness rollup fix.** Runner pre-fetches the most recent ETF
+  history date across BTC/ETH/SOL and injects it as a `dataFreshness`
+  line into the prompt; rule #2 grades against it.
+- **Langfuse cycle traces.** Real trace per run keyed by runId; /log
+  links to `${LANGFUSE_BASE_URL}/trace/{trace_id}`.
+- **Cross-chain wallet stack.** wagmi v2 + ConnectKit + React Query
+  with Base + ValueChain testnet. Connect button + per-chain USDC and
+  native gas balances on /portfolio.
+- **systemd hardening.** Production build under `sonar.service` with
+  Restart=always and 60s graceful stop. nginx vhost committed to repo.
+  https://sonar.my.id survives `systemctl restart`.
 
-See [docs/wave-changelog.md](docs/wave-changelog.md) for the explicit
+**Wave 3 carry-over.**
+
+- Mirror Protocol bridge widget (foundations in Wave 2; needs the public
+  contract addresses to light up; see `docs/mirror-bridge.md`).
+- Scoped session-key delegation (Wave 2 keeps the executor on a
+  server-side hot wallet; user connect is read-only).
+- Production risk engine (VaR, drawdown caps, correlation limits).
+- Custom SSI index proposals.
+- Public read-only landing for non-wallet visitors.
+
+See [docs/wave-changelog.md](docs/wave-changelog.md) for the full
 deliverables ledger.
 
 
@@ -303,11 +353,16 @@ deliverables ledger.
 
 | Doc | Purpose |
 |---|---|
-| [docs/architecture.md](docs/architecture.md) | Two-chain split, stack rationale, runtime diagram |
-| [docs/api-integration.md](docs/api-integration.md) | SoSoValue endpoints, casing quirks, MiMo relay setup |
+| [docs/architecture.md](docs/architecture.md) | Two-chain split, stack rationale, runtime diagram, Wave 2 execution path |
+| [docs/api-integration.md](docs/api-integration.md) | SoSoValue endpoints + SoDEX live signing + Langfuse + viem chain config |
+| [docs/sodex-live.md](docs/sodex-live.md) | SoDEX testnet wire reference (auth, EIP-712, order shape, polling, all five non-obvious gotchas with reproducers) |
+| [docs/price-coverage.md](docs/price-coverage.md) | 27/27 coverage table from pre-prep B3 |
+| [docs/mirror-bridge.md](docs/mirror-bridge.md) | Mirror Protocol bridge discovery; open Discord question and fallback strategy |
 | [docs/thesis-schema.md](docs/thesis-schema.md) | The structured object the agent emits, with validation rules |
-| [docs/wave-changelog.md](docs/wave-changelog.md) | Explicit Wave 1 deliverables ledger |
+| [docs/wave-changelog.md](docs/wave-changelog.md) | Wave 1 + Wave 2 deliverables ledger |
 | [docs/demo-script.md](docs/demo-script.md) | 3-minute walkthrough plan |
+| [ops/systemd/sonar.service](ops/systemd/sonar.service) | Production systemd unit |
+| [ops/nginx/sonar.conf](ops/nginx/sonar.conf) | nginx vhost (TLS via certbot) |
 
 ---
 
