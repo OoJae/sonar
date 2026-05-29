@@ -319,6 +319,70 @@ export async function getAccountId(kind: Kind = "perps"): Promise<number> {
 }
 
 // ---------------------------------------------------------------------------
+// Public API: getVenueVusdc
+//
+// Returns the SoDEX venue-ledger vUSDC balance for the agent wallet, split by
+// engine (spot, perps). This is the execution capital: it is held inside the
+// SoDEX exchange, not as a raw ERC-20 in the wallet (the on-chain balanceOf
+// at the wallet address is 0 because deposits are custodied by the venue).
+//
+// Shapes confirmed by probe 2026-05-29:
+//   spot /state  data.B  = [{i, a:"vUSDC", t:"800", l:"0"}]  (t = total)
+//   perps /balances data.balances = [{id, coin:"vUSDC", total:"200", ...}]
+// Both reads are unsigned public account reads.
+// ---------------------------------------------------------------------------
+export async function getVenueVusdc(): Promise<{
+  spot: number;
+  perps: number;
+}> {
+  const address = getSignerAddress();
+
+  let spot = 0;
+  try {
+    const spotState = await getAccountState({ kind: "spot" });
+    const balances = (spotState as Record<string, unknown>).B;
+    if (Array.isArray(balances)) {
+      const vusdc = balances.find(
+        (b): b is Record<string, unknown> =>
+          typeof b === "object" && b !== null && (b as Record<string, unknown>).a === "vUSDC",
+      );
+      if (vusdc && typeof vusdc.t !== "undefined") {
+        const n = Number(vusdc.t);
+        if (Number.isFinite(n)) spot = n;
+      }
+    }
+  } catch (err) {
+    logger.warn("sodex.venue_spot_read_failed", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  let perps = 0;
+  try {
+    const res = await fetch(
+      `${testnetGateway("perps")}/accounts/${address}/balances`,
+      { method: "GET", headers: { Accept: "application/json" }, cache: "no-store" },
+    );
+    if (res.ok) {
+      const json = (await res.json()) as {
+        data?: { balances?: Array<{ coin?: string; total?: string | number }> };
+      };
+      const vusdc = json.data?.balances?.find((b) => b.coin === "vUSDC");
+      if (vusdc && vusdc.total !== undefined) {
+        const n = Number(vusdc.total);
+        if (Number.isFinite(n)) perps = n;
+      }
+    }
+  } catch (err) {
+    logger.warn("sodex.venue_perps_read_failed", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  return { spot, perps };
+}
+
+// ---------------------------------------------------------------------------
 // Public API: listPerpSymbols
 //
 // Public unauthenticated read returning all tradeable perpetual contracts on

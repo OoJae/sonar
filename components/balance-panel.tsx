@@ -25,7 +25,9 @@ const VALUECHAIN_TESTNET_ID = 138565;
 export type AgentBalanceProps = {
   address: string | null;
   baseUsdc: string | null;
-  valuechainTestnetUsdc: string | null;
+  valuechainOnchainUsdc: string | null;
+  venueSpotVusdc: string | null;
+  venuePerpsVusdc: string | null;
   notes: string[];
 };
 
@@ -136,16 +138,30 @@ export function BalancePanel({ agent }: { agent: AgentBalanceProps }) {
           <div className="mt-4 space-y-2">
             <BalanceRow
               chain="Base"
-              label="USDC"
+              label="USDC (on-chain)"
               value={agent.baseUsdc !== null ? formatUsdc(agent.baseUsdc) : "-"}
             />
             <BalanceRow
               chain="ValueChain testnet"
-              label="USDC"
+              label="vUSDC (on-chain wallet)"
               value={
-                agent.valuechainTestnetUsdc !== null
-                  ? formatUsdc(agent.valuechainTestnetUsdc)
+                agent.valuechainOnchainUsdc !== null
+                  ? formatUsdc(agent.valuechainOnchainUsdc)
                   : "pending"
+              }
+            />
+            <BalanceRow
+              chain="SoDEX venue"
+              label="vUSDC (spot ledger)"
+              value={
+                agent.venueSpotVusdc !== null ? formatUsdc(agent.venueSpotVusdc) : "-"
+              }
+            />
+            <BalanceRow
+              chain="SoDEX venue"
+              label="vUSDC (perps margin)"
+              value={
+                agent.venuePerpsVusdc !== null ? formatUsdc(agent.venuePerpsVusdc) : "-"
               }
             />
           </div>
