@@ -57,6 +57,15 @@ const EnvShape = z.object({
     .transform((v) => v === "true"),
   SONAR_MAX_NOTIONAL_PER_ORDER: z.coerce.number().positive().default(500),
   SONAR_MAX_NOTIONAL_PER_CYCLE: z.coerce.number().positive().default(2000),
+  // Macro circuit breaker lookahead window (hours). When a high-impact macro
+  // event (CPI, FOMC, etc.) falls within this horizon, the agent de-risks.
+  SONAR_MACRO_HALT_HORIZON_HOURS: z.coerce.number().positive().default(6),
+  // Interactive public run-a-cycle demo budget, "<count>/<windowSeconds>".
+  // Default: 1 run per 300s globally. Parsed by the demo-run endpoint.
+  SONAR_PUBLIC_RUN_RATELIMIT: z
+    .string()
+    .regex(/^\d+\/\d+$/, { message: "SONAR_PUBLIC_RUN_RATELIMIT must be '<count>/<seconds>'" })
+    .default("1/300"),
   SODEX_TESTNET_BASE_URL: z
     .string()
     .url()

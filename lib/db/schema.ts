@@ -46,6 +46,10 @@ export const agentRuns = pgTable("agent_runs", {
   dataSource: text("data_source").notNull(),
   ok: boolean("ok").notNull().default(false),
   error: text("error"),
+  // Macro circuit breaker (Wave 2 edge): set when a high-impact macro event in
+  // the lookahead horizon made the cycle de-risk. Human-readable, cites the
+  // event. Null on normal cycles.
+  haltReason: text("halt_reason"),
 });
 
 export const theses = pgTable("theses", {
