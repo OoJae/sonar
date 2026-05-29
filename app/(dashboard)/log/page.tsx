@@ -90,6 +90,7 @@ export default async function LogPage() {
                   <TableHead>Model</TableHead>
                   <TableHead>Data</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Breaker</TableHead>
                   <TableHead>Trace</TableHead>
                 </TableRow>
               </TableHeader>
@@ -123,6 +124,18 @@ export default async function LogPage() {
                         >
                           {run.ok ? "ok" : "failed"}
                         </Badge>
+                      </TableCell>
+                      <TableCell className="mono text-xs">
+                        {run.haltReason ? (
+                          <span
+                            className="text-[color:var(--gold)]"
+                            title={run.haltReason}
+                          >
+                            de-risk
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground/50">-</span>
+                        )}
                       </TableCell>
                       <TableCell className="mono text-xs">
                         {run.traceId ? (

@@ -129,6 +129,8 @@ export const SosoEndpoint = {
   EtfSummaryHistory: "/openapi/v1/etfs/summary-history",
   // Path template; currency_id is interpolated at call time.
   CurrencyMarketSnapshot: "/openapi/v1/currencies/{currency_id}/market-snapshot",
+  // Macro economic events calendar (circuit breaker source).
+  MacroEvents: "/openapi/v1/macro/events",
 } as const;
 export type SosoEndpointName = keyof typeof SosoEndpoint;
 

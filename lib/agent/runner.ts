@@ -15,6 +15,8 @@ import { ThesisSchema, type Thesis, type UniverseKey } from "./thesis";
 import { placeOrder, getPositions } from "@/lib/sodex/executor";
 import { computeAllNavs } from "@/lib/ssi/nav";
 import { getEtfSummaryHistory } from "@/lib/sosovalue/client";
+import { evaluateMacroWindow, type BreakerState } from "@/lib/agent/circuit-breaker";
+import { setDeRiskFactor, clearDeRisk } from "@/lib/sodex/risk";
 
 // Xiaomi MiMo V2.5 Pro via its Anthropic-compatible endpoint. The @ai-sdk/
 // anthropic package handles the Messages API + tool calls; we just override
@@ -47,6 +49,13 @@ export async function runAgentCycle(opts?: {
   const tools = buildAgentTools(capture);
 
   let trace: CycleTrace | null = null;
+  let breaker: BreakerState = {
+    active: false,
+    action: "de-risk",
+    event: null,
+    deRiskFactor: 1,
+    reason: null,
+  };
 
   try {
     if (!e.MIMO_API_KEY) {
@@ -67,11 +76,30 @@ export async function runAgentCycle(opts?: {
     // subsequent tool call is a no-op on the wire.
     const dataFreshness = await fetchDataFreshness();
 
+    // Macro circuit breaker: if a high-impact macro event is within the
+    // lookahead horizon, the cycle de-risks. The state is injected into the
+    // prompt (so the agent cites the event and tilts toward USSI) AND enforced
+    // server-side (the risk gate scales caps, executeAllocations tilts weights),
+    // so the de-risk holds even if the model ignores the prompt.
+    breaker = await evaluateMacroWindow({ nowIso });
+    if (breaker.active) {
+      setDeRiskFactor(breaker.deRiskFactor);
+      await db()
+        .update(schema.agentRuns)
+        .set({ haltReason: breaker.reason })
+        .where(eq(schema.agentRuns.id, runId));
+      logger.info("agent.circuit_breaker_active", {
+        runId,
+        event: breaker.event?.name,
+        deRiskFactor: breaker.deRiskFactor,
+      });
+    }
+
     // Open a Langfuse trace keyed by runId. If Langfuse is not configured,
     // startCycleTrace returns null and the rest of the cycle runs unchanged.
     trace = startCycleTrace({
       runId,
-      input: { universe, nowIso, dataFreshness, mode: e.SONAR_EXECUTION_MODE },
+      input: { universe, nowIso, dataFreshness, mode: e.SONAR_EXECUTION_MODE, circuitBreaker: breaker.reason },
       model: MODEL_ID,
     });
     if (trace) {
@@ -83,7 +111,12 @@ export async function runAgentCycle(opts?: {
     const result = await generateText({
       model: provider(MODEL_ID),
       system: SYSTEM_PROMPT,
-      prompt: USER_PROMPT_TEMPLATE({ nowIso, universe, dataFreshness }),
+      prompt: USER_PROMPT_TEMPLATE({
+        nowIso,
+        universe,
+        dataFreshness,
+        circuitBreaker: breaker.active ? breaker.reason : null,
+      }),
       tools,
       stopWhen: stepCountIs(16),
       temperature: 0.2,
@@ -133,7 +166,7 @@ export async function runAgentCycle(opts?: {
     );
 
     if (capture.thesis.mode === "trade") {
-      await executeAllocations(capture.thesis);
+      await executeAllocations(capture.thesis, breaker);
     }
 
     if (trace) {
@@ -168,6 +201,9 @@ export async function runAgentCycle(opts?: {
     await finishRun(runId, false, message);
     return { ok: false, runId, error: message };
   } finally {
+    // Always clear the process de-risk factor so it never leaks into the next
+    // cycle (the runner sets it per cycle when the breaker fires).
+    clearDeRisk();
     if (trace) {
       try {
         await trace.flush();
@@ -287,7 +323,10 @@ async function persistNavSnapshots(): Promise<void> {
 const NOTIONAL_BOOK_SIZE_USD = 100_000;
 const DUST_THRESHOLD_USD = 10;
 
-async function executeAllocations(thesis: Thesis): Promise<void> {
+async function executeAllocations(
+  thesis: Thesis,
+  breaker: BreakerState,
+): Promise<void> {
   const positions = await getPositions();
   const equity = positions.reduce(
     (acc, p) =>
@@ -298,9 +337,14 @@ async function executeAllocations(thesis: Thesis): Promise<void> {
   // first cycle would size every trade at zero.
   const bookSize = Math.max(equity, NOTIONAL_BOOK_SIZE_USD);
 
+  // Circuit breaker de-risk tilt: scale every risky index target weight down
+  // by the de-risk factor so more of the book sits in USSI during a macro
+  // window. The hedges are scaled separately by the risk gate's cap factor.
+  const weightScale = breaker.active ? breaker.deRiskFactor : 1;
+
   for (const alloc of thesis.proposedAllocations) {
     const market = `${alloc.index}.ssi`;
-    const targetUSD = bookSize * alloc.targetWeight;
+    const targetUSD = bookSize * alloc.targetWeight * weightScale;
     const current = positions.find((p) => p.market === market);
     const currentUSD = current
       ? current.markPrice *

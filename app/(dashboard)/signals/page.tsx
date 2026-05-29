@@ -52,12 +52,27 @@ async function loadFlowSeries(asset: EtfAsset) {
   }));
 }
 
+async function loadLatestHaltReason(): Promise<string | null> {
+  try {
+    const rows = await db()
+      .select({ haltReason: schema.agentRuns.haltReason })
+      .from(schema.agentRuns)
+      .orderBy(desc(schema.agentRuns.startedAt))
+      .limit(1);
+    return rows[0]?.haltReason ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export default async function SignalsPage() {
   const thesis = await loadLatestThesis();
 
   if (!thesis) {
     return <EmptyState />;
   }
+
+  const haltReason = await loadLatestHaltReason();
 
   const citedAssets = new Set(
     thesis.signals.etfFlowSignal.map((s) => s.asset),
@@ -67,6 +82,14 @@ export default async function SignalsPage() {
 
   return (
     <div className="space-y-10">
+      {haltReason ? (
+        <div className="rounded-md border border-[color:var(--gold)]/40 bg-[color:var(--gold)]/10 px-4 py-3">
+          <div className="mono text-[10px] uppercase tracking-[0.2em] text-[color:var(--gold)]">
+            macro circuit breaker
+          </div>
+          <p className="mt-1 text-sm text-foreground/90">{haltReason}</p>
+        </div>
+      ) : null}
       <Header thesis={thesis} />
       <Allocations thesis={thesis} />
       <div className="grid gap-6 lg:grid-cols-2">

@@ -61,19 +61,24 @@ export const USER_PROMPT_TEMPLATE = ({
   nowIso,
   universe,
   dataFreshness,
+  circuitBreaker,
 }: {
   nowIso: string;
   universe: string[];
   dataFreshness: string | null;
+  circuitBreaker?: string | null;
 }) => {
   const freshnessLine = dataFreshness
     ? `Data freshness (UTC): ${dataFreshness} (compare against current time when applying rule 2)`
     : `Data freshness (UTC): UNKNOWN (no underlying ETF history was fetchable; output mode "no-trade" per rule 2)`;
+  const breakerLine = circuitBreaker
+    ? `\nMACRO CIRCUIT BREAKER ACTIVE: ${circuitBreaker} Reduce risky index weights, raise the USSI residual, shrink any hedge notional, and cite this macro event in your reasoning and riskNotes. The server enforces the de-risk regardless, but your allocations should reflect it.`
+    : "";
   return `Run a daily Sonar cycle.
 
 Current time (UTC): ${nowIso}
 ${freshnessLine}
-Universe: ${universe.join(", ")}
+Universe: ${universe.join(", ")}${breakerLine}
 
 Produce exactly one thesis. Begin by pulling the inputs you need.`;
 };

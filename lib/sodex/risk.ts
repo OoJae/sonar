@@ -27,6 +27,21 @@ export const DUST_FLOOR_USD = 10;
 
 const cycleNotionalSpent = new Map<string, number>();
 
+// Macro circuit-breaker de-risk factor. 1 = normal; a fraction (e.g. 1/3)
+// scales the per-order and per-cycle caps down for the active cycle so live
+// hedges shrink during a high-impact macro window. The runner sets this at
+// cycle start and clears it after. Process-scoped, like the cycle accumulator.
+let deRiskFactor = 1;
+export function setDeRiskFactor(factor: number): void {
+  deRiskFactor = factor > 0 && factor <= 1 ? factor : 1;
+}
+export function clearDeRisk(): void {
+  deRiskFactor = 1;
+}
+export function currentDeRiskFactor(): number {
+  return deRiskFactor;
+}
+
 export type OrderCapResult = {
   notionalUSD: number;
   downsized: boolean;
@@ -41,11 +56,13 @@ export function isDust(notionalUSD: number): boolean {
 }
 
 export function enforcePerOrderCap(requestedUSD: number): OrderCapResult {
-  const cap = env().SONAR_MAX_NOTIONAL_PER_ORDER;
+  // The de-risk factor shrinks the cap during an active macro window.
+  const cap = env().SONAR_MAX_NOTIONAL_PER_ORDER * deRiskFactor;
   if (requestedUSD > cap) {
     logger.info("risk.per_order_downsize", {
       requested: requestedUSD,
       cap,
+      deRiskFactor,
     });
     return { notionalUSD: cap, downsized: true };
   }
@@ -56,7 +73,7 @@ export function enforcePerCycleCap(
   runId: string,
   requestedUSD: number,
 ): CycleCapResult {
-  const cap = env().SONAR_MAX_NOTIONAL_PER_CYCLE;
+  const cap = env().SONAR_MAX_NOTIONAL_PER_CYCLE * deRiskFactor;
   const spent = cycleNotionalSpent.get(runId) ?? 0;
   if (spent + requestedUSD > cap) {
     const reason = `per-cycle cap of $${cap} would be exceeded: already spent $${spent}, requested $${requestedUSD}`;

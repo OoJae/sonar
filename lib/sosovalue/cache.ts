@@ -153,4 +153,6 @@ export const CACHE_TTL = {
   // 5 minutes is enough that one cron cycle prices all 27 tokens fresh and
   // intra-day re-renders hit cache. Well under the 100 rpm budget.
   marketSnapshot: 5 * 60,
+  // Macro calendar changes slowly (scheduled releases); 1 hour is plenty.
+  macroEvents: 60 * 60,
 } as const;
