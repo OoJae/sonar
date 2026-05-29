@@ -168,6 +168,28 @@ export function BalancePanel({ agent }: { agent: AgentBalanceProps }) {
         </div>
       </div>
 
+      <div className="rounded-md border border-border/60 bg-card/40 p-4 space-y-2">
+        <div className="mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+          Cross-chain funding
+        </div>
+        <p className="text-sm text-muted-foreground">
+          There is no testnet bridge between Base and ValueChain (confirmed with
+          the SoSoValue team). The ValueChain execution wallet is funded by
+          withdrawing test USDC from the SoDEX testnet to its on-chain address;
+          the faucet feeds the SoDEX account, and a withdrawal moves funds
+          on-chain when needed. Mirror Protocol is the mainnet bridge design (see{" "}
+          <span className="mono">lib/chain/bridge.ts</span>), gated off on testnet.
+        </p>
+        <a
+          href="https://testnet.sodex.dev"
+          target="_blank"
+          rel="noreferrer"
+          className="mono text-[11px] text-accent hover:underline"
+        >
+          Open SoDEX testnet to withdraw to ValueChain
+        </a>
+      </div>
+
       {agent.notes.length > 0 ? (
         <ul className="mono text-[11px] text-muted-foreground/80 space-y-1">
           {agent.notes.map((n, i) => (

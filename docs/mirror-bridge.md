@@ -1,19 +1,22 @@
-# Mirror Protocol Bridge Discovery (Base ↔ ValueChain)
+# Cross-chain funding and the Mirror Protocol bridge (Base ↔ ValueChain)
 
-> Pre-prep B4 deliverable. Documents what was found, what was not found, and the fallback strategy for Phase 5 cross-chain bridging.
+> Documents the cross-chain funding reality for Wave 2 and the Mirror Protocol mainnet bridge design. The original B4 discovery log is preserved below from §1.
 
 ---
 
-## TL;DR
+## TL;DR (RESOLVED 2026-05-27, Discord)
 
-**Status: BLOCKED on Discord clarification.** The "Mirror Protocol" name referenced in the project notes is not publicly documented anywhere I could probe (SoSoValueLabs GitHub org, SoSoValue API docs, SSI Protocol source, general web search). It is most likely an internal name for a not-yet-public bridge, or a third-party bridge whose actual product name we have not yet been told.
+**There is no testnet bridge between Base and ValueChain.** The SoSoValue team confirmed this on Discord. So Mirror Protocol bridging is a **mainnet-only design** in Wave 2, not a testnet feature. The original "blocked, awaiting Mirror contract addresses" framing is moot.
 
-**Phase 5 plan adjusts as follows:**
-- **5.1 (wagmi + ConnectKit + two-chain balance reads)** ships unchanged. The wallet provider and the balance panel work without any bridge code.
-- **5.2 (bridge widget)** ships as a **non-functional preview by default**, with the actual bridge call wired in once a confirmed testnet bridge surface is identified. The widget shows the two-chain balance, the "bridge needed" hint, and an inline status reading *"Awaiting bridge contract confirmation; see docs/mirror-bridge.md"* until the path is resolved.
-- A Discord ask is queued (see §5 below).
+**The Wave 2 cross-chain funding path (testnet):** the ValueChain execution wallet is funded by **withdrawing test USDC from the SoDEX testnet to its on-chain ValueChain address**. The faucet feeds the SoDEX testnet account; a withdrawal moves funds on-chain when needed.
 
-This satisfies the Wave 2 commitment that *"a connected user signs their own bridge transaction"* the moment the bridge surface is confirmed; the entire executor, risk gate, NAV, freshness, traces, and balance panel are in no way blocked by this.
+**What ships in Wave 2:**
+- The three-balance cross-chain panel on /portfolio (real): Base USDC, on-chain ValueChain vUSDC, and the SoDEX venue ledger (spot + perps). See [components/balance-panel.tsx](../components/balance-panel.tsx) and [lib/chain/balances.ts](../lib/chain/balances.ts).
+- A funding surface explaining the SoDEX-withdrawal path, with a link to the SoDEX testnet. The bearer-guarded [app/api/chain/fund-valuechain/route.ts](../app/api/chain/fund-valuechain/route.ts) attempts the programmatic withdrawal.
+- [lib/sodex/client.ts](../lib/sodex/client.ts)'s `withdrawVusdcToOnchain` (the SoDEX `transferAsset` action with `type=EVM_WITHDRAW`). **Caveat (2026-05-29):** the programmatic on-chain withdrawal destination constant is not publicly documented. Probed against testnet: `toAccountID=0` gives a `required`-tag error; `toAccountID=<own aid>` gives `toAccountID is invalid`. The SoDEX SDK SKILL.md directs on-chain deposits and withdrawals "via the SoDEX web UI," and only the perps↔spot transfer (magic `999`) is documented as a programmatic transfer. So testnet ValueChain funding is a SoDEX-dashboard operation; the client method stays shape-correct and flips to working the moment the destination constant is confirmed (Discord) or for the mainnet flow.
+- [lib/chain/bridge.ts](../lib/chain/bridge.ts): the Mirror Protocol **mainnet bridge design**, config-gated so it can never run on testnet. Wave 3 wires the ABI.
+
+**Submission framing (honest, per playbook §7):** Mirror testnet bridge unavailable, confirmed with the SoSoValue team; used the SoDEX testnet withdrawal path for ValueChain funding, with Mirror as the mainnet design. Adaptive honesty reads better than a faked bridge, and the extra SoDEX withdrawal integration strengthens the Solid API Usage pillar.
 
 ---
 

@@ -776,6 +776,14 @@ export async function findOrderByClOrdID(
 const COIN_ID_VUSDC = 0;
 const TRANSFER_TYPE_SPOT_TO_PERPS = 3;
 const PERPS_DESTINATION_ACCOUNT_ID = 999;
+// EVM_WITHDRAW per common/enums/transfer_asset_type.go. Moves vUSDC out of the
+// SoDEX spot ledger to the on-chain ValueChain address that owns the account
+// (the signer's own wallet; the TransferAssetRequest struct carries no explicit
+// recipient field, so the destination is implicit). This is the Wave 2
+// cross-chain funding path: there is no testnet bridge between Base and
+// ValueChain (confirmed by the SoSoValue team), so an on-chain ValueChain
+// balance comes from withdrawing the faucet-funded SoDEX testnet balance.
+const TRANSFER_TYPE_EVM_WITHDRAW = 2;
 
 export async function transferSpotToPerps(input: {
   amountUSD: string;       // DecimalString
@@ -834,6 +842,91 @@ export async function transferSpotToPerps(input: {
             : JSON.stringify(env);
       throw new Error(
         `SoDEX transferSpotToPerps rejected: code=${env.code} ${message.slice(0, 200)}`,
+      );
+    }
+  }
+  return { ok: true, raw: json };
+}
+
+// ---------------------------------------------------------------------------
+// Public API: withdrawVusdcToOnchain
+//
+// Withdraws vUSDC from the SoDEX spot ledger to the agent wallet's on-chain
+// ValueChain address. This is the Wave 2 cross-chain funding path: the SoDEX
+// team confirmed there is no testnet bridge between Base and ValueChain, so an
+// on-chain ValueChain vUSDC balance is produced by withdrawing the
+// faucet-funded SoDEX testnet balance.
+//
+// Same `transferAsset` action, spot-engine endpoint, and spot signing domain
+// as transferSpotToPerps, with type = EVM_WITHDRAW (2). The on-chain recipient
+// is implicit (the signer's own address; the request struct has no recipient
+// field).
+//
+// DISCOVERY (2026-05-29): the programmatic on-chain withdrawal destination is
+// NOT publicly documented. Probed against testnet:
+//   toAccountID=0          -> "Field validation for 'ToAccountID' failed on the
+//                             'required' tag" (Go rejects the zero value)
+//   toAccountID=<own aid>  -> "toAccountID is invalid"
+// The SoDEX SDK SKILL.md states on-chain deposits/withdrawals are done "via the
+// Sodex web UI"; only the perps<->spot transfer (magic 999) is documented as a
+// programmatic transfer. So testnet ValueChain funding is a SoDEX-dashboard
+// operation, and this method stays here shape-correct for when the destination
+// constant is confirmed (Discord) or for the mainnet flow. The caller surfaces
+// the engine error and points the user at the SoDEX testnet withdrawal UI as
+// the honest fallback (see app/api/chain/fund-valuechain). The cross-chain
+// story the demo shows is the three-balance panel (Base USDC + on-chain
+// ValueChain vUSDC + SoDEX venue spot/perps), which is fully real.
+// ---------------------------------------------------------------------------
+export async function withdrawVusdcToOnchain(input: {
+  amountUSD: string; // DecimalString
+}): Promise<{ ok: true; raw: unknown }> {
+  const fromAccountID = await getAccountId("spot");
+  const transferId = Date.now();
+
+  const body = {
+    id: transferId,
+    fromAccountID,
+    toAccountID: fromAccountID,
+    coinID: COIN_ID_VUSDC,
+    amount: input.amountUSD,
+    type: TRANSFER_TYPE_EVM_WITHDRAW,
+  };
+
+  const { sign, nonce, payload } = await signAction("spot", {
+    type: "transferAsset",
+    params: body,
+  });
+  void payload;
+
+  const url = `${testnetGateway("spot")}/accounts/transfers`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: signedHeaders(sign, nonce),
+    body: JSON.stringify(body),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const errBody = await logHttpError("withdrawVusdcToOnchain", res, sign, nonce);
+    throw new Error(
+      `SoDEX withdrawVusdcToOnchain ${res.status}: ${errBody.slice(0, 200)}`,
+    );
+  }
+  const json: unknown = await res.json();
+  logger.info("sodex.withdraw_response", {
+    amount: input.amountUSD,
+    body: JSON.stringify(json).slice(0, 400),
+  });
+  if (typeof json === "object" && json !== null) {
+    const env = json as Record<string, unknown>;
+    if (typeof env.code === "number" && env.code !== 0) {
+      const message =
+        typeof env.message === "string"
+          ? env.message
+          : typeof env.error === "string"
+            ? env.error
+            : JSON.stringify(env);
+      throw new Error(
+        `SoDEX withdrawVusdcToOnchain rejected: code=${env.code} ${message.slice(0, 200)}`,
       );
     }
   }
