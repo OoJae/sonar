@@ -42,9 +42,44 @@ lib/sodex         executor facade routes placeOrder by SONAR_EXECUTION_MODE:
                     markets.ts   Sonar market -> SoDEX symbol name
                     client.ts    signed client (submitPerpOrder,
                                  getAccountState, transferSpotToPerps, etc.)
-lib/chain         agent hot wallet balance reads (server-side viem)
+lib/chain         agent hot wallet balance reads (server-side viem) +
+                    bridge.ts (Mirror Protocol mainnet design, config-gated)
+lib/sosovalue/macro.ts   macro events reader (/openapi/v1/macro/events)
+lib/agent/circuit-breaker.ts   high-impact macro window evaluator (de-risk)
+lib/track/compute.ts     NAV-weighted track record vs buy-and-hold baseline
+lib/utils/ratelimit.ts   Redis-or-in-process limiter + single-flight lock
 lib/db            Drizzle schema + postgres-js client
 ```
+
+## Cross-chain funding (no testnet bridge)
+
+The SoSoValue team confirmed there is no testnet bridge between Base and
+ValueChain. The ValueChain execution wallet is funded by a SoDEX testnet
+withdrawal of vUSDC to its on-chain address (`lib/sodex/client.ts:
+withdrawVusdcToOnchain`, the transferAsset action with type=EVM_WITHDRAW).
+Mirror Protocol is the mainnet bridge design in `lib/chain/bridge.ts`,
+config-gated by `assertMainnet()` so it can never run on testnet; Wave 3 wires
+the ABI. The /portfolio panel shows three real balances (Base USDC, on-chain
+ValueChain vUSDC, SoDEX venue spot/perps).
+
+## Macro circuit breaker
+
+Pre-cycle, the runner evaluates the macro window. If a high-impact event
+(CPI/FOMC/NFP/PCE/GDP/PPI by name allowlist) falls within
+`SONAR_MACRO_HALT_HORIZON_HOURS`, the cycle de-risks: the prompt tells the
+agent to tilt to USSI and cite the event, and a server backstop scales the
+risk-gate notional caps and tilts the runner's target weights toward USSI. The
+cited reason persists to `agent_runs.halt_reason` and surfaces on /signals and
+/log.
+
+## Track record and interactive demo
+
+`/track` reads existing theses, nav_snapshots, and orders to chart Sonar's
+rebalanced book versus a buy-and-hold baseline of the same indices, with
+per-thesis attribution and win rate; every number links to its cited thesis.
+`/api/agent/demo-run` is a rate-limited public endpoint that lets a judge
+trigger a real live-testnet cycle from the dashboard without any secret on the
+client.
 
 ## Wave 2 execution path
 

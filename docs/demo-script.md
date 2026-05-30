@@ -80,3 +80,40 @@ integrated stack, one track record. Thank you."
 - Pre-fund the perps sub-account before recording (run
   `pnpm tsx scripts/sodex-fund-perps.ts 200` once); insufficient margin
   rejections are not the demo we want to ship
+
+---
+
+## Wave 2 demo plan (max 3 minutes, the updated cut)
+
+Per CLAUDE-WAVE2 section 16. Record Tuesday to Friday after a US close so the
+agent produces a trade thesis on fresh data.
+
+1. 15s recap. Sonar in one line; what Wave 1 proved (the loop, the citations).
+2. 25s architecture. The executor abstraction (paper to live as an interface
+   swap), the two-chain reality, and the SoDEX withdrawal funding path (no
+   testnet bridge; Mirror is the mainnet design).
+3. 60s live execution. On /signals click "Run a cycle now (demo)" (or trigger
+   the cycle yourself). Show the order preview block with status badges, the
+   risk gate downsizing or rejecting an over-cap order, a real SoDEX fill, then
+   /portfolio with the position, its real SoDEX order id, and the NAV vs
+   buy-and-hold chart.
+4. 45s the track record. Open /track. Show cumulative return vs buy-and-hold,
+   the win rate, and click a thesis row through to the dated cited thesis on
+   /log. This is the moment that separates Sonar from the field.
+5. 20s the circuit breaker and funding. Show a /log row with the de-risk chip
+   (or the /signals breaker banner citing the macro event), and the
+   three-balance cross-chain funding panel on /portfolio.
+6. 15s Wave 3 roadmap. Full risk engine, wallet connect with session keys,
+   mainnet plus live Mirror bridge, multi-strategy.
+
+Demo-prep checklist additions for Wave 2:
+- To force a visible circuit-breaker de-risk on camera regardless of the live
+  calendar, temporarily set `SONAR_MACRO_HALT_HORIZON_HOURS` high enough that
+  the next real CPI or FOMC print falls in window (for example 400), rebuild,
+  restart, run one cycle, then revert to 6. The /signals banner and /log
+  de-risk chip will show the real cited event.
+- The interactive "Run a cycle now" control is rate limited to one run per
+  300s; trigger it once at the start of the take so the cooldown does not bite
+  mid-recording.
+- The kill switch (`SONAR_EXECUTION_MODE=paper`) still applies; flipping it on
+  camera is the honest recovery if a live order misbehaves.

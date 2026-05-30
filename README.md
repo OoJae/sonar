@@ -48,10 +48,13 @@ never custody). The decision log shows rejected theses next to accepted ones.
 | Charts NAV vs inception on /portfolio | Pure-SVG line chart in [components/nav-chart.tsx](components/nav-chart.tsx); snapshots persist per index per cycle |
 | Places signed perp orders on SoDEX testnet | EIP-712 typed-data signing via viem in [lib/sodex/client.ts](lib/sodex/client.ts); idempotent client-order-id and risk-gate caps in [lib/sodex/live.ts](lib/sodex/live.ts) and [lib/sodex/risk.ts](lib/sodex/risk.ts) |
 | Surfaces every wire-side order | Per-thesis order preview block on /signals with status badges (pending, submitted, filled, rejected) and the SoDEX system order id |
-| Lets the user read their cross-chain balances | wagmi v2 + ConnectKit wallet panel in [components/balance-panel.tsx](components/balance-panel.tsx); Base USDC + ValueChain testnet native gas |
+| Shows a verifiable track record | [/track](app/(dashboard)/track/page.tsx) charts Sonar's NAV-weighted rebalanced book versus a buy-and-hold baseline, with per-thesis attribution and win rate; every number links to the cited thesis. Computed from existing data in [lib/track/compute.ts](lib/track/compute.ts) |
+| De-risks around macro events | Macro circuit breaker reads SoSoValue [/openapi/v1/macro/events](docs/sosovalue-macro.md); a high-impact window (CPI, FOMC, NFP) caps notional and tilts to USSI ([lib/agent/circuit-breaker.ts](lib/agent/circuit-breaker.ts)), cited in the thesis and persisted to `agent_runs.halt_reason` |
+| Lets a judge run a live cycle | Rate-limited public [Run a cycle now](app/api/agent/demo-run/route.ts) control on /signals; no secret reaches the client |
+| Funds the ValueChain wallet | SoDEX testnet withdrawal path (no testnet bridge exists); three-balance cross-chain panel in [components/balance-panel.tsx](components/balance-panel.tsx). Mirror Protocol is the mainnet bridge design ([lib/chain/bridge.ts](lib/chain/bridge.ts)) |
 | Publishes per-cycle traces | Real Langfuse trace per run, linked from /log |
 | Refuses to act on stale data | Runner pre-fetches a `dataFreshness` value before the cycle and injects it into the prompt; rule #2 grades against the injected field |
-| Surfaces every decision | Three-page dashboard: Signals, Portfolio, Log |
+| Surfaces every decision | Four-page dashboard: Signals, Portfolio, Track, Log |
 
 A live cycle in Wave 2 (runId `b9e5ed8f`) produced three paper SSI trades
 and one signed SOL-PERP fill on SoDEX testnet, with the agent's $50k hedge
@@ -328,21 +331,35 @@ recent US ETF close is more than 36 hours stale.
   line into the prompt; rule #2 grades against it.
 - **Langfuse cycle traces.** Real trace per run keyed by runId; /log
   links to `${LANGFUSE_BASE_URL}/trace/{trace_id}`.
-- **Cross-chain wallet stack.** wagmi v2 + ConnectKit + React Query
-  with Base + ValueChain testnet. Connect button + per-chain USDC and
-  native gas balances on /portfolio.
+- **Cross-chain funding.** No testnet bridge exists (confirmed with the
+  SoSoValue team), so the ValueChain wallet is funded by a SoDEX testnet
+  withdrawal. Three-balance panel on /portfolio (Base USDC, on-chain
+  ValueChain vUSDC, SoDEX venue spot/perps). Mirror Protocol is the
+  config-gated mainnet bridge design. wagmi v2 + ConnectKit lets the user
+  read their own balances.
+- **Verifiable track record (`/track`).** Cumulative NAV-weighted return
+  versus a buy-and-hold baseline, per-thesis attribution, win rate, every
+  number linking to its cited thesis. The artifact no other AI fund shows.
+- **Macro circuit breaker.** SoSoValue macro events drive an auto-de-risk
+  (cap + USSI tilt) when a high-impact window (CPI, FOMC) is near. Cited
+  and persisted to `agent_runs.halt_reason`; banner on /signals.
+- **Interactive run-a-cycle demo.** A rate-limited public control triggers
+  a real live-testnet cycle from the dashboard; no secret on the client.
+- **Langfuse cycle traces.** Real trace per run keyed by runId; /log
+  links to `${LANGFUSE_BASE_URL}/trace/{trace_id}`.
 - **systemd hardening.** Production build under `sonar.service` with
   Restart=always and 60s graceful stop. nginx vhost committed to repo.
   https://sonar.my.id survives `systemctl restart`.
 
 **Wave 3 carry-over.**
 
-- Mirror Protocol bridge widget (foundations in Wave 2; needs the public
-  contract addresses to light up; see `docs/mirror-bridge.md`).
+- Live Mirror Protocol mainnet bridge (the config-gated design is in
+  `lib/chain/bridge.ts`; Wave 3 wires the ABI). Live mainnet execution.
 - Scoped session-key delegation (Wave 2 keeps the executor on a
   server-side hot wallet; user connect is read-only).
-- Production risk engine (VaR, drawdown caps, correlation limits).
-- Custom SSI index proposals.
+- Production risk engine (VaR, drawdown caps, correlation limits) beyond
+  the Wave 2 notional caps and macro breaker.
+- Custom SSI index proposals; the delta-neutral USSI multi-strategy.
 - Public read-only landing for non-wallet visitors.
 
 See [docs/wave-changelog.md](docs/wave-changelog.md) for the full

@@ -107,15 +107,52 @@
   read/send timeouts for in-flight agent cycles). Install + transition
   verified end to end; https://sonar.my.id survives `systemctl restart`.
 
+**Cross-chain funding pivot (no testnet bridge).** The SoSoValue team confirmed
+on Discord there is no testnet bridge between Base and ValueChain. The Wave 2
+funding path is a SoDEX testnet withdrawal of vUSDC to the on-chain ValueChain
+address (`lib/sodex/client.ts:withdrawVusdcToOnchain`, the transferAsset action
+with type=EVM_WITHDRAW). The three-balance panel on /portfolio (Base USDC,
+on-chain ValueChain vUSDC, SoDEX venue spot/perps) is real. Mirror Protocol is
+demoted to a config-gated mainnet design (`lib/chain/bridge.ts`), never run on
+testnet. Honest caveat: the programmatic withdrawal destination constant is not
+publicly documented (the SoDEX SDK directs on-chain withdrawals through the web
+UI), so the testnet withdrawal is a dashboard operation; the client method flips
+to working when the constant is confirmed. See `docs/mirror-bridge.md`.
+
+**Verifiable track-record page (`/track`).** The centerpiece, and the artifact
+no other AI-fund project can show. Computed entirely from existing data
+(`lib/track/compute.ts`): cumulative NAV-weighted return of Sonar's rebalanced
+book versus a buy-and-hold baseline of the same index universe, per-thesis P&L
+attribution, and win rate, all since inception. Pure-SVG two-line chart
+(`components/track-chart.tsx`). Every row links to the dated, cited thesis that
+produced it. Honest "paper plus testnet during the buildathon" framing; the
+credibility is the verifiability.
+
+**Macro circuit breaker.** Using SoSoValue's `/openapi/v1/macro/events`
+(`lib/sosovalue/macro.ts`, documented in `docs/sosovalue-macro.md`), the agent
+auto-de-risks when a high-impact event (CPI, FOMC, NFP, PCE, GDP, PPI by name
+allowlist) falls within `SONAR_MACRO_HALT_HORIZON_HOURS`
+(`lib/agent/circuit-breaker.ts`). Two enforcement points: the prompt (the agent
+cites the event and tilts to USSI) and a server backstop (the risk gate scales
+notional caps, the runner tilts target weights toward USSI). The cited reason
+persists to `agent_runs.halt_reason`; /signals shows a breaker banner and /log a
+de-risk chip. Verified end to end on a real upcoming CPI print.
+
+**Interactive run-a-cycle demo.** A rate-limited public endpoint
+(`app/api/agent/demo-run`, `lib/utils/ratelimit.ts`) lets a judge trigger a
+real live-testnet cycle from the dashboard ("Run a cycle now" on /signals) and
+watch the agent reason and execute. Hard global plus per-IP budget from
+`SONAR_PUBLIC_RUN_RATELIMIT`, a single-flight lock, and no secret ever reaches
+the client. The existing risk caps bound what a stranger can trigger.
+
 ### Carried forward to Wave 3
 
-- Mirror Protocol bridge widget (5.2 in the plan). UI and Phase 5.1 wallet
-  stack are in place; the actual bridge call lights up the moment Discord
-  confirms the testnet contract addresses (see `docs/mirror-bridge.md`).
+- Live Mirror Protocol mainnet bridge (the ABI wiring; `lib/chain/bridge.ts`
+  carries the config-gated design). Live mainnet execution behind the gated
+  flag.
 - Production risk engine (VaR, drawdown caps, correlation limits). Wave 2
-  ships flat notional caps only.
-- Custom SSI index proposals.
+  ships flat notional caps plus the macro circuit breaker.
+- Custom SSI index proposals and the delta-neutral USSI multi-strategy module.
 - Scoped session-key delegation (Wave 2 uses a server-side hot wallet for
   the executor; the user-facing wallet connect is read-only on Wave 2).
-- Public read-only landing for non-wallet visitors.
-- Mobile UX polish.
+- Public read-only landing for non-wallet visitors. Mobile UX polish.
