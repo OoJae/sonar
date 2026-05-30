@@ -2,12 +2,14 @@ import Link from "next/link";
 import { Radar } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { DashboardNav } from "@/components/dashboard-nav";
+import { executionModeLabel } from "@/lib/utils/mode";
 
 export default function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const mode = executionModeLabel();
   return (
     <div className="flex min-h-screen flex-col">
       <header className="sticky top-0 z-20 border-b border-border bg-background/90 backdrop-blur">
@@ -22,8 +24,9 @@ export default function DashboardLayout({
           <Badge
             variant="outline"
             className="mono text-[10px] uppercase tracking-[0.18em]"
+            title="SONAR_EXECUTION_MODE"
           >
-            wave 1 paper
+            {mode}
           </Badge>
         </div>
       </header>

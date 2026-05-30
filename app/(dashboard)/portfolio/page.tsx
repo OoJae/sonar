@@ -20,6 +20,7 @@ import {
 import { NavChart, type NavPoint } from "@/components/nav-chart";
 import { BalancePanel } from "@/components/balance-panel";
 import { getAgentBalances } from "@/lib/chain/balances";
+import { executionModeLabel } from "@/lib/utils/mode";
 
 export const dynamic = "force-dynamic";
 
@@ -83,19 +84,22 @@ export default async function PortfolioPage() {
             variant="outline"
             className="mono text-[10px] uppercase tracking-[0.18em]"
           >
-            paper portfolio
+            portfolio
           </Badge>
           <Badge
             variant="secondary"
             className="mono text-[10px] uppercase tracking-[0.18em]"
+            title="SONAR_EXECUTION_MODE"
           >
-            wave 1 / simulated execution
+            {executionModeLabel()}
           </Badge>
         </div>
         <h1 className="text-3xl font-semibold tracking-tight">Book</h1>
         <p className="text-sm text-muted-foreground max-w-2xl">
-          Every trade is stamped with the thesis that authorized it. Wave 2
-          swaps the engine for live SoDEX execution without changing the shape.
+          Every trade is stamped with the thesis that authorized it. Perp hedges
+          fire as EIP-712 signed orders on SoDEX testnet; SSI rebalance legs are
+          recorded against the book. The executor speaks one contract, so the
+          mode badge above is the only thing that changes between paper and live.
         </p>
       </div>
 

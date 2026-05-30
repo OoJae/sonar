@@ -18,7 +18,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Sonar: ETF-Flow-Aware Agentic Hedge Fund",
   description:
-    "An AI agent that ingests SoSoValue ETF flows and structured news, publishes dated, cited theses, and rebalances SSI indices with transparent paper execution.",
+    "An AI agent that ingests SoSoValue ETF flows and structured news, publishes dated, cited theses, rebalances SSI indices, and hedges live on SoDEX testnet with a verifiable track record.",
 };
 
 export default function RootLayout({

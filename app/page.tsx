@@ -15,7 +15,7 @@ export default function Landing() {
           <div className="flex items-center gap-3">
             <Radar className="size-5 text-[color:var(--gold)]" aria-hidden />
             <span className="mono text-xs uppercase tracking-[0.22em] text-muted-foreground">
-              Sonar / Wave 1 preview
+              Sonar / Wave 2 / live on SoDEX testnet
             </span>
           </div>
           <h1 className="mt-6 max-w-3xl text-5xl font-semibold leading-[1.05] tracking-tight text-foreground lg:text-6xl">
@@ -42,13 +42,13 @@ export default function Landing() {
               href="/portfolio"
               className={buttonVariants({ variant: "outline", size: "lg" })}
             >
-              View paper portfolio
+              View portfolio
             </Link>
             <Badge
               variant="secondary"
               className="mono text-[10px] uppercase tracking-[0.18em]"
             >
-              Wave 1 is paper trading. Wave 2 goes live.
+              Live SoDEX testnet execution, with a verifiable track record.
             </Badge>
           </div>
 
@@ -152,6 +152,6 @@ const LOOP_STEPS = [
   },
   {
     title: "Execute",
-    body: "Paper trades mirror the proposed allocation. Hedges flow through SoDEX in Wave 2. Every trade links to its thesis.",
+    body: "Perp hedges fire as EIP-712 signed orders on SoDEX testnet through the risk gate; SSI rebalance legs are recorded against the book. Every trade links to its thesis.",
   },
 ];
