@@ -21,6 +21,7 @@ import {
 import { FlowChart } from "@/components/flow-chart";
 import { ReasoningWithCitations } from "@/components/reasoning-with-citations";
 import { OrderPreview } from "@/components/order-preview";
+import { DemoRunButton } from "@/components/demo-run-button";
 import { getEtfSummaryHistory } from "@/lib/sosovalue/client";
 import type { EtfAsset } from "@/lib/agent/thesis";
 
@@ -122,22 +123,25 @@ function Header({ thesis }: { thesis: Thesis }) {
   const modeLabel = thesis.mode === "trade" ? "Trade" : "No trade";
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center gap-2">
-        <Badge
-          variant="outline"
-          className="mono text-[10px] uppercase tracking-[0.2em]"
-        >
-          thesis / {thesis.id.slice(0, 8)}
-        </Badge>
-        <Badge
-          className="mono text-[10px] uppercase tracking-[0.2em]"
-          variant={thesis.mode === "trade" ? "default" : "secondary"}
-        >
-          {modeLabel}
-        </Badge>
-        <span className="mono text-[11px] text-muted-foreground">
-          as of {new Date(thesis.asOf).toISOString().replace("T", " ").slice(0, 16)}Z
-        </span>
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge
+            variant="outline"
+            className="mono text-[10px] uppercase tracking-[0.2em]"
+          >
+            thesis / {thesis.id.slice(0, 8)}
+          </Badge>
+          <Badge
+            className="mono text-[10px] uppercase tracking-[0.2em]"
+            variant={thesis.mode === "trade" ? "default" : "secondary"}
+          >
+            {modeLabel}
+          </Badge>
+          <span className="mono text-[11px] text-muted-foreground">
+            as of {new Date(thesis.asOf).toISOString().replace("T", " ").slice(0, 16)}Z
+          </span>
+        </div>
+        <DemoRunButton />
       </div>
       <h1 className="max-w-3xl text-3xl font-semibold tracking-tight">
         {headline(thesis)}
