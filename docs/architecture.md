@@ -16,7 +16,7 @@ User (browser)
 Next.js App Router (Vercel-ready, deployed on VPS for Wave 1)
   |-- app/(dashboard)/*      server components, read DB
   |-- app/api/agent/run      POST, triggers one cycle
-  |-- app/api/cron/daily     Host crontab at 21:30 UTC, weekdays (Mon-Fri)
+  |-- app/api/cron/daily     Host crontab at 04:00 UTC Tue-Sat (~8h after each US close)
   |-- app/api/signals        GET, latest theses
   `-- app/api/portfolio      GET, positions + trades
 
@@ -162,7 +162,7 @@ Production runs under systemd as `sonar.service` (`ops/systemd/sonar.service`),
 crash does not take the URL down. nginx (`ops/nginx/sonar.conf`) terminates
 TLS at https://sonar.my.id via Let's Encrypt and proxies to the local app;
 the 300s read/send timeouts give an in-flight agent cycle room to complete.
-The host crontab fires `/api/cron/daily` at 21:30 UTC weekdays (the
-`30 5 * * 2-6` Beijing-local line accounts for the host timezone). Postgres
+The host crontab fires `/api/cron/daily` at 04:00 UTC Tue-Sat, ~8h after the US close so same-day flows have posted (the
+`0 12 * * 2-6` Beijing-local line accounts for the host timezone). Postgres
 runs in Docker (`sonar-pg`, restart=unless-stopped) so it also survives
 VPS reboots.

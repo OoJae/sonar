@@ -76,7 +76,7 @@ Two chains, one agent.
   (`SONAR_EXECUTION_MODE=paper`).
 
 ```
-                  21:30 UTC weekdays (post US ETF close)
+                  04:00 UTC, post US ETF close
                                   |
                                   v
                             Host crontab
@@ -308,7 +308,7 @@ recent US ETF close is more than 36 hours stale.
 - Drizzle-backed paper trading engine with mark-to-market
 - Three dashboards: Signals, Portfolio, Log
 - MCP server stubs for SoSoValue, SSI, SoDEX
-- Cron-driven daily cycle (21:30 UTC weekdays, post US ETF close)
+- Cron-driven daily cycle (04:00 UTC, ~8h after each weekday US close)
 - Apache 2.0 license
 
 **Wave 2 (shipped).**

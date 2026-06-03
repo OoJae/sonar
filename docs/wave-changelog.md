@@ -20,7 +20,7 @@
 - Inline numbered citations on /signals that link to article URLs (news) or
   show tooltips (ETF flows), with a Sources block below the prose
 - /portfolio Thesis chips show date + mode and deep-link to `/log#run-<id>`
-- Host crontab daily trigger at 21:30 UTC weekdays, protected by
+- Host crontab daily trigger at 04:00 UTC Tue-Sat, protected by
   `CRON_SECRET` (vercel.json retained for a future Vercel deploy)
 - Production env-boot guard: refuses to start in `NODE_ENV=production`
   without `CRON_SECRET` set
