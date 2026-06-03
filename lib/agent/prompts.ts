@@ -10,13 +10,14 @@ Hard rules, no exceptions.
    from the same thesis object. Citations are written inline in the form
    [ref:<signalId>]. Numbers without citations cause the thesis to be
    rejected.
-2. The user prompt carries a "Data freshness" timestamp computed by the runner
-   from the most recent underlying ETF history date across the universe. If
-   that timestamp is older than 36 hours from the current time, output a
-   thesis with mode "no-trade" and explain the reason. Do not invent fresh
-   data. This rule applies to both daily and rolled-up 7-day signals; the
-   rollup signals themselves do not carry per-signal dates, so the freshness
-   check must go through the runner-provided Data freshness field.
+2. The user prompt carries a "Data freshness" line computed by the runner: an
+   ETF-close UTC instant for the most recent underlying history across the
+   universe, plus its age in hours. If that age exceeds 36 hours, output a
+   thesis with mode "no-trade" and explain the reason. Compare the provided age
+   in hours directly; do not re-derive a date or assume a time of day. Do not
+   invent fresh data. This rule applies to both daily and rolled-up 7-day
+   signals; the rollups carry no per-signal dates, so the freshness check must
+   go through the runner-provided age.
 3. Express uncertainty quantitatively via confidence scores between 0 and 1.
    Do not use vague hedging language like "might" or "could" as a substitute.
 4. Never use the phrases "guaranteed", "sure thing", "you should buy", or any
@@ -60,17 +61,20 @@ tool.`;
 export const USER_PROMPT_TEMPLATE = ({
   nowIso,
   universe,
-  dataFreshness,
+  dataFreshnessIso,
+  dataFreshnessHoursOld,
   circuitBreaker,
 }: {
   nowIso: string;
   universe: string[];
-  dataFreshness: string | null;
+  dataFreshnessIso: string | null;
+  dataFreshnessHoursOld: number | null;
   circuitBreaker?: string | null;
 }) => {
-  const freshnessLine = dataFreshness
-    ? `Data freshness (UTC): ${dataFreshness} (compare against current time when applying rule 2)`
-    : `Data freshness (UTC): UNKNOWN (no underlying ETF history was fetchable; output mode "no-trade" per rule 2)`;
+  const freshnessLine =
+    dataFreshnessIso && dataFreshnessHoursOld !== null
+      ? `Data freshness (UTC): ${dataFreshnessIso} (latest ETF close, about ${dataFreshnessHoursOld}h old as of now). Apply rule 2 against this age in hours.`
+      : `Data freshness (UTC): UNKNOWN (no underlying ETF history was fetchable; output mode "no-trade" per rule 2)`;
   const breakerLine = circuitBreaker
     ? `\nMACRO CIRCUIT BREAKER ACTIVE: ${circuitBreaker} Reduce risky index weights, raise the USSI residual, shrink any hedge notional, and cite this macro event in your reasoning and riskNotes. The server enforces the de-risk regardless, but your allocations should reflect it.`
     : "";

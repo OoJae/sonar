@@ -74,7 +74,7 @@ export async function runAgentCycle(opts?: {
     // grade them. We peek at the same ETF history endpoint the agent would
     // call via getHistoricalFlows; the call results are cached so the agent's
     // subsequent tool call is a no-op on the wire.
-    const dataFreshness = await fetchDataFreshness();
+    const freshness = await fetchDataFreshness(nowIso);
 
     // Macro circuit breaker: if a high-impact macro event is within the
     // lookahead horizon, the cycle de-risks. The state is injected into the
@@ -99,7 +99,7 @@ export async function runAgentCycle(opts?: {
     // startCycleTrace returns null and the rest of the cycle runs unchanged.
     trace = startCycleTrace({
       runId,
-      input: { universe, nowIso, dataFreshness, mode: e.SONAR_EXECUTION_MODE, circuitBreaker: breaker.reason },
+      input: { universe, nowIso, dataFreshness: freshness?.asOfIso ?? null, dataFreshnessHoursOld: freshness?.hoursOld ?? null, mode: e.SONAR_EXECUTION_MODE, circuitBreaker: breaker.reason },
       model: MODEL_ID,
     });
     if (trace) {
@@ -114,7 +114,8 @@ export async function runAgentCycle(opts?: {
       prompt: USER_PROMPT_TEMPLATE({
         nowIso,
         universe,
-        dataFreshness,
+        dataFreshnessIso: freshness?.asOfIso ?? null,
+        dataFreshnessHoursOld: freshness?.hoursOld ?? null,
         circuitBreaker: breaker.active ? breaker.reason : null,
       }),
       tools,
@@ -276,23 +277,34 @@ async function persistThesis(runId: string, thesis: Thesis): Promise<void> {
   }
 }
 
-// Returns the latest ETF history date across the universe, or null if no
-// underlying history is reachable. The runner uses this to inject a "Data
-// freshness" line into the user prompt so rule #2 (the 36-hour rule) can
-// grade 7-day rollup signals that do not carry per-signal dates. Failure
-// to fetch any history surfaces as null and the prompt explicitly tells
-// the agent to emit a no-trade thesis.
-async function fetchDataFreshness(): Promise<string | null> {
+// ETF flow rows carry a bare calendar date with no intraday time, and the
+// figures are finalized at the US market close (roughly 20:00 to 21:00 UTC). We
+// anchor the freshness instant at this close hour rather than letting a bare
+// date be read as midnight UTC, which would overstate the data's age by up to
+// ~21 hours and make rule #2 (the 36h freshness gate) refuse fresh prior-day
+// data. Tunable.
+const ETF_CLOSE_UTC_HOUR = 21;
+
+// Returns the latest ETF history instant across the universe plus its age in
+// hours, or null if no underlying history is reachable. The runner injects both
+// into the user prompt so rule #2 (the 36-hour rule) grades 7-day rollup
+// signals (which carry no per-signal dates) against an unambiguous UTC instant
+// and a precomputed age, instead of a bare date the model has to assume a time
+// of day for. Failure to fetch any history surfaces as null and the prompt
+// explicitly tells the agent to emit a no-trade thesis.
+async function fetchDataFreshness(
+  nowIso: string,
+): Promise<{ asOfIso: string; hoursOld: number } | null> {
   const probeAssets = ["BTC", "ETH", "SOL"] as const;
-  let latest: string | null = null;
+  let latestDate: string | null = null;
   for (const asset of probeAssets) {
     try {
       const res = await getEtfSummaryHistory(asset);
       // API is reverse-chronological; first element is the freshest.
       const first = res.data.data?.[0];
       const date = first?.date;
-      if (typeof date === "string" && (!latest || date > latest)) {
-        latest = date;
+      if (typeof date === "string" && (!latestDate || date > latestDate)) {
+        latestDate = date;
       }
     } catch (err) {
       logger.warn("runner.data_freshness_probe_failed", {
@@ -301,7 +313,12 @@ async function fetchDataFreshness(): Promise<string | null> {
       });
     }
   }
-  return latest;
+  if (!latestDate) return null;
+  const asOfIso = `${latestDate}T${String(ETF_CLOSE_UTC_HOUR).padStart(2, "0")}:00:00Z`;
+  const hoursOld =
+    Math.round(((Date.parse(nowIso) - Date.parse(asOfIso)) / 3_600_000) * 10) /
+    10;
+  return { asOfIso, hoursOld };
 }
 
 async function persistNavSnapshots(): Promise<void> {
