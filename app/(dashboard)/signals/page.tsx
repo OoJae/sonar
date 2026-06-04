@@ -45,13 +45,20 @@ async function loadLatestThesis(): Promise<Thesis | null> {
 }
 
 async function loadFlowSeries(asset: EtfAsset) {
-  const res = await getEtfSummaryHistory(asset);
-  // Live API is reverse-chronological; flip then take the last 21 sessions.
-  const chronological = [...(res.data.data ?? [])].reverse();
-  return chronological.slice(-21).map((p) => ({
-    date: p.date.slice(5),
-    value: p.total_net_inflow ?? 0,
-  }));
+  try {
+    const res = await getEtfSummaryHistory(asset);
+    // Live API is reverse-chronological; flip then take the last 21 sessions.
+    const chronological = [...(res.data.data ?? [])].reverse();
+    return chronological.slice(-21).map((p) => ({
+      date: p.date.slice(5),
+      value: p.total_net_inflow ?? 0,
+    }));
+  } catch {
+    // Degrade gracefully: a SoSoValue outage or a bad key yields an empty chart,
+    // not a 500. The rest of /signals (thesis, reasoning, track headline, order
+    // preview) reads stored data and keeps rendering.
+    return [];
+  }
 }
 
 async function loadLatestHaltReason(): Promise<string | null> {
