@@ -49,12 +49,11 @@ close once that session's flow data has published:
    notes.
 5. **Validation:** A strict validator rejects any thesis with unsourced numbers,
    missing risk notes, or weights summing above 1.0.
-6. **Execution:** Valid theses are persisted and the book is rebalanced through
-   an executor facade that routes by mode. In live-testnet mode, perp hedges fire
-   as real EIP-712 signed orders on SoDEX through a risk gate, while SSI index
-   rebalance legs are recorded against the book (SoDEX testnet has no spot pairs
-   for the index tokens). Every trade is stamped with its thesis id; flipping to
-   paper is an instant kill switch.
+6. **Execution:** Valid theses are persisted and the book is rebalanced via an
+   executor facade that routes by mode. In live-testnet mode, perp hedges fire as
+   real EIP-712 signed orders on SoDEX through a risk gate, while SSI index legs
+   are recorded against the book (no SSI spot pairs on testnet). Every trade is
+   stamped with its thesis id; flipping to paper is an instant kill switch.
 
 ## Wave 1 Deliverables (Shipped)
 
@@ -85,7 +84,9 @@ close once that session's flow data has published:
   rate, every number linking to the dated, cited thesis behind it. Honest
   paper-plus-testnet framing.
 * **Off-Chain NAV Computation:** Each index's on-chain tokenset priced against
-  SoSoValue feeds (27 of 27 tokens), charted versus a buy-and-hold baseline.
+  SoSoValue feeds (27 of 27 tokens), charted versus a buy-and-hold baseline. Open
+  positions mark to that same live NAV, so the Portfolio P&L is real, not
+  placeholder-priced.
 * **Macro Circuit Breaker:** Reading SoSoValue's macro events, the agent
   auto-de-risks (caps notional, tilts to USSI) when a high-impact window (CPI,
   FOMC, NFP) is near, citing the event and persisting it.
@@ -100,12 +101,12 @@ close once that session's flow data has published:
 * **Cross-Chain Funding (we declared Mirror bridging):** We declared a Mirror
   Protocol bridge to move USDC between Base and ValueChain in-dashboard.
   Mid-build, the SoSoValue team confirmed there is no testnet bridge, so we
-  adapted in the open: the ValueChain wallet is funded by a SoDEX testnet
-  withdrawal, the three-balance panel (Base, ValueChain, SoDEX venue) is real,
-  and Mirror ships as the config-gated mainnet design.
-* **Operational Hardening:** The production build runs under systemd with
-  auto-restart; nginx vhost in the repo; TLS via Let's Encrypt.
-  https://sonar.my.id survives restarts and reboots.
+  adapted: the ValueChain wallet is funded by a SoDEX testnet withdrawal, the
+  three-balance panel is real, and Mirror ships as the config-gated mainnet
+  design.
+* **Operational Hardening:** Runs under systemd with auto-restart; nginx vhost in
+  the repo; TLS via Let's Encrypt. https://sonar.my.id survives restarts and
+  reboots.
 
 ## Wave 3 Roadmap
 
