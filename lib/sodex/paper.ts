@@ -10,31 +10,48 @@ import {
   type PaperPosition,
 } from "./types";
 import { logger } from "@/lib/utils/logger";
+import { getPriceUSD } from "@/lib/prices";
+import { computeNav } from "@/lib/ssi/nav";
+import type { SsiIndexKey } from "@/lib/ssi/addresses";
 
-// Wave 1 reference prices: simple static quotes. In Phase B step 18 we swap
-// these for marks derived from SoSoValue currentEtfDataMetrics + a public
-// price oracle. Keeping a single source-of-prices function lets us swap later
-// in one place.
-const REFERENCE_PRICES_USD: Record<string, number> = {
-  "BTC-PERP": 97_500,
-  "ETH-PERP": 3_650,
-  "SOL-PERP": 172,
-  "MAG7.ssi": 132.4,
-  "DEFI.ssi": 48.2,
-  "MEME.ssi": 12.7,
-  "USSI": 1.0,
+// Position marks come from live sources, never hardcoded quotes. SSI index legs
+// mark to live computeNav (the same source the NAV-per-share chart uses, so the
+// Positions table and the chart never disagree); perp legs mark to the base
+// asset's live SoSoValue price. FALLBACK_PRICES_USD is an emergency-only path
+// for a brief live-source outage (an RPC blip), never the primary mark.
+const SSI_MARKETS: Record<string, SsiIndexKey> = {
+  "MAG7.ssi": "MAG7",
+  "DEFI.ssi": "DEFI",
+  "MEME.ssi": "MEME",
+  USSI: "USSI",
+};
+
+const FALLBACK_PRICES_USD: Record<string, number> = {
+  "BTC-PERP": 64_000,
+  "ETH-PERP": 1_900,
+  "SOL-PERP": 82,
 };
 
 const FEE_BPS = 10;
 
-function priceOf(market: string): number {
-  const p = REFERENCE_PRICES_USD[market];
-  if (p === undefined) {
+async function priceOf(market: string): Promise<number> {
+  const ssiIndex = SSI_MARKETS[market];
+  if (ssiIndex) {
+    const nav = await computeNav(ssiIndex);
+    if (nav.navPerShareUSD > 0) return nav.navPerShareUSD;
+  } else {
+    const base = market.replace(/-(perp|usd)$/i, "");
+    const px = await getPriceUSD(base);
+    if (px && px > 0) return px;
+  }
+  const fallback = FALLBACK_PRICES_USD[market];
+  if (fallback === undefined) {
     throw new Error(
-      `Paper engine has no reference price for ${market}. Add it to REFERENCE_PRICES_USD or resolve from a live source.`,
+      `Paper engine: no live price for ${market} and no fallback configured.`,
     );
   }
-  return p;
+  logger.warn("paper.using_fallback_price", { market, fallback });
+  return fallback;
 }
 
 function applySlippage(price: number, side: "buy" | "sell", bps: number): number {
@@ -44,7 +61,7 @@ function applySlippage(price: number, side: "buy" | "sell", bps: number): number
 
 export async function placeOrder(input: OrderRequest): Promise<ExecutedTrade> {
   const req = OrderRequestSchema.parse(input);
-  const mid = priceOf(req.market);
+  const mid = await priceOf(req.market);
   const fillPrice =
     req.type === "limit" && req.limitPrice
       ? req.limitPrice
@@ -132,7 +149,7 @@ async function upsertPosition(trade: ExecutedTrade): Promise<void> {
     : trade.fillPrice;
 
   const nextSide: "long" | "short" = nextQty >= 0 ? "long" : "short";
-  const markPrice = priceOf(trade.market);
+  const markPrice = await priceOf(trade.market);
   const unrealized =
     (markPrice - avgEntryPrice) * absNext * (nextSide === "long" ? 1 : -1);
 
@@ -154,7 +171,16 @@ export async function markToMarket(): Promise<PaperPosition[]> {
   const rows = await db().select().from(schema.paperPositions);
   const updates: PaperPosition[] = [];
   for (const row of rows) {
-    const mark = priceOf(row.market);
+    let mark: number;
+    try {
+      mark = await priceOf(row.market);
+    } catch (err) {
+      logger.warn("paper.mark_to_market_skip", {
+        market: row.market,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      mark = Number(row.markPrice);
+    }
     const qty = Number(row.quantity);
     const entry = Number(row.avgEntryPrice);
     const unrealized = (mark - entry) * qty * (row.side === "long" ? 1 : -1);

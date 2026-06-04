@@ -12,7 +12,7 @@ import { ThesisSchema, type Thesis, type UniverseKey } from "./thesis";
 // All execution routes through the executor facade. Paper / live-testnet /
 // live-mainnet switching is governed by SONAR_EXECUTION_MODE; the runner
 // stays the same regardless. See lib/sodex/executor.ts for the routing rules.
-import { placeOrder, getPositions } from "@/lib/sodex/executor";
+import { placeOrder, getPositions, markToMarket } from "@/lib/sodex/executor";
 import { computeAllNavs } from "@/lib/ssi/nav";
 import { getEtfSummaryHistory } from "@/lib/sosovalue/client";
 import { evaluateMacroWindow, type BreakerState } from "@/lib/agent/circuit-breaker";
@@ -169,6 +169,15 @@ export async function runAgentCycle(opts?: {
     if (capture.thesis.mode === "trade") {
       await executeAllocations(capture.thesis, breaker);
     }
+
+    // Refresh every position mark to a live price each cycle (consistent with
+    // the NAV snapshot just persisted), so /portfolio never shows stale or
+    // placeholder marks. Non-fatal: a stale mark beats a failed cycle.
+    await markToMarket().catch((err) =>
+      logger.warn("agent.mark_to_market_failed", {
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
 
     if (trace) {
       trace.update({

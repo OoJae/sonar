@@ -407,7 +407,12 @@ async function finalizeOrder(
       kind: "perp",
       side: req.side,
       type: req.type,
-      notionalUsd: String(req.notionalUSD),
+      // Record the actual filled notional (fill price x fill quantity), not the
+      // pre-risk-gate request notional. Otherwise the paper_trades row would
+      // claim the agent's intended size (e.g. $100k) while the position and the
+      // live orders row reflect the downsized fill (e.g. $500), an inconsistency
+      // a reviewer would catch on /portfolio.
+      notionalUsd: String((fillPrice || 0) * (fillQuantity || 0)),
       fillPrice: String(fillPrice || 0),
       fillQuantity: String(fillQuantity || 0),
       slippageBps: req.slippageBps,
