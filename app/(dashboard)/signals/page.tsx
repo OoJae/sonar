@@ -22,6 +22,7 @@ import { FlowChart } from "@/components/flow-chart";
 import { ReasoningWithCitations } from "@/components/reasoning-with-citations";
 import { OrderPreview } from "@/components/order-preview";
 import { DemoRunButton } from "@/components/demo-run-button";
+import { TrackHeadline } from "@/components/track-headline";
 import { getEtfSummaryHistory } from "@/lib/sosovalue/client";
 import type { EtfAsset } from "@/lib/agent/thesis";
 
@@ -91,6 +92,7 @@ export default async function SignalsPage() {
           <p className="mt-1 text-sm text-foreground/90">{haltReason}</p>
         </div>
       ) : null}
+      <TrackHeadline />
       <Header thesis={thesis} />
       <Allocations thesis={thesis} />
       <div className="grid gap-6 lg:grid-cols-2">
