@@ -339,7 +339,8 @@ function NavSection({ navSeries }: { navSeries: NavSeries }) {
         <CardTitle className="text-base">NAV per share</CardTitle>
         <CardDescription>
           Computed off-chain from each SSI index tokenset and live SoSoValue
-          prices. Dotted line marks inception. Each agent cycle adds a snapshot.
+          prices. USSI is the stable reference, held at $1 by definition. Dotted
+          line marks inception. Each agent cycle adds a snapshot.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -365,6 +366,11 @@ function NavSection({ navSeries }: { navSeries: NavSeries }) {
                   <div className="mb-2 flex items-center justify-between">
                     <span className="mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
                       {idx}.ssi
+                      {idx === "USSI" ? (
+                        <span className="ml-2 normal-case tracking-normal opacity-70">
+                          stable reference
+                        </span>
+                      ) : null}
                     </span>
                     <span className="mono text-xs">
                       ${latest.toFixed(latest >= 1 ? 2 : 4)}
