@@ -40,8 +40,10 @@ live-testnet cycle from the dashboard and watch it; no secret reaches the
 client.
 
 NAV computation, off-chain from the on-chain tokenset times SoSoValue prices
-(27/27 tokens covered), charted vs a buy-and-hold baseline. Freshness fix so
-the 36-hour rule grades 7-day rollups. Real Langfuse traces linked from Log.
+(27/27 tokens covered), charted vs a buy-and-hold baseline. The data-freshness
+clock is anchored to the ETF close and the daily cron runs after it, so the
+agent trades the just-closed session rather than stale data. Real Langfuse
+traces linked from Log.
 
 Cross-chain funding. The SoSoValue team confirmed there is no testnet bridge,
 so the ValueChain wallet is funded by a SoDEX testnet withdrawal; the
@@ -59,7 +61,7 @@ Live Mirror Protocol mainnet bridge and gated mainnet execution; a production
 risk engine (VaR, drawdown caps, correlation limits) on top of the Wave 2
 notional caps and macro breaker; scoped session-key delegation so a connected
 user authorizes the agent without a server-side hot wallet; the delta-neutral
-USSI multi-strategy module; a public read-only landing for non-wallet visitors.
+USSI multi-strategy module.
 
 ---
 

@@ -2,7 +2,8 @@
 
 Draft text for the Wave 2 submission form fields. The form's "Updates in
 this Wave" field is capped at 3,000 characters (the Wave 1 trap from round
-8). The version below sits inside that limit; the long-form ledger is in
+8). The body below sits inside that limit and mirrors the paste-ready copy
+in `docs/akindo-wave2-submission.md`; the long-form ledger is in
 `docs/wave-changelog.md`.
 
 ## Form fields
@@ -25,78 +26,59 @@ https://github.com/OoJae/sonar
 
 ### Updates in this Wave (3,000 char cap)
 
-Wave 2 lit up the live execution loop on SoDEX testnet. The agent now
-places real EIP-712 signed perp orders through a single executor facade
-(`lib/sodex/executor.ts`) that switches between paper and live by env
-var, with a kill switch one `systemctl restart sonar` away.
+Wave 2 turns Sonar from a paper prototype into a live, verifiable agentic
+hedge fund on the SoSoValue stack.
 
-Headline outcomes:
+Live SoDEX testnet execution. The agent's thesis places real EIP-712 signed
+perp orders on SoDEX testnet through a live executor behind the same
+OrderRequest contract the Wave 1 paper engine used. Orders are idempotent
+(deterministic clOrdID, unique DB constraint), fill-polled, and recorded with
+the real SoDEX order id. A live cycle placed a downsized SOL-PERP hedge that
+filled at $82.65. Five non-obvious SoDEX protocol details (v-byte
+normalization, clOrdID format, two-layer error envelope, unsigned account
+read, base-URL path) are documented in docs/sodex-live.md.
 
-1. Live BTC-PERP and SOL-PERP fills on SoDEX testnet, recorded with real
-   sodexOrderIds. The idempotency double-run test passes (DB unique
-   constraint on `client_order_id` plus a deterministic clOrdID derived
-   from thesisId + market). The risk gate (`lib/sodex/risk.ts`)
-   downsizes per-order over-cap requests, blocks once the per-cycle
-   notional is breached, enforces a $10 dust floor, and refuses
-   live-mainnet defence-in-depth. On a live cycle the agent's $50,000
-   hedge notional was downsized to $500 and the order filled at $82.65
-   on SOL-USD; the downsizing is logged on /signals next to the status
-   badge.
+Risk gate and confirmation. Per-order downsize, per-cycle cap, dust floor,
+mode gate, kill switch. The order preview block on Signals shows each order's
+status badge before and as it fills; rejection reasons surface inline. A $50k
+agent hedge was downsized to $500 on camera.
 
-2. Five non-obvious SoDEX protocol details discovered and documented in
-   `docs/sodex-live.md` with reproducers: the ECDSA recovery-byte
-   normalization (viem returns v=27/28, the engine expects 0/1); the
-   `sonar-<16 hex>` clOrdID format constraint; the two-layer error
-   envelope (top-level `code` plus per-order `data[*].code`); the
-   unsigned `getAccountState` read; the `/api/v1` URL prefix gotcha.
-   Plus a transferSpotToPerps signed action (`scripts/sodex-fund-perps.ts`)
-   because the testnet faucet only funds spot.
+Verifiable track record (/track). The artifact no AI fund shows: cumulative
+NAV-weighted return of Sonar's rebalanced book versus a buy-and-hold baseline
+of the same SSI indices, per-thesis P&L attribution, and win rate, every number
+linking to the dated, cited thesis that produced it. Honest paper-plus-testnet
+framing; the credibility is the verifiability.
 
-3. NAV per share computed off-chain in `lib/ssi/nav.ts` from each SSI
-   tokenset times live SoSoValue prices (27/27 underlying tokens covered
-   per `docs/price-coverage.md`; no fallback source needed). Snapshots
-   persist per index per cycle and render on /portfolio as a pure-SVG
-   line chart with a dashed inception reference and a percent-from-
-   inception delta in the per-index header. The Wave 1 placeholder
-   reference prices in `paper.ts` were just placeholders; real per-share
-   NAVs are sub-dollar.
+Macro circuit breaker. Using SoSoValue's /macro/events, the agent auto-de-risks
+(caps notional and tilts to USSI) when a high-impact event (CPI, FOMC, NFP) is
+within the lookahead horizon, citing the event and persisting the reason.
+Verified end to end on a real upcoming CPI print.
 
-4. Freshness rollup fix. The runner pre-fetches the freshest ETF history
-   date across BTC, ETH, SOL before invoking the model and injects it as
-   `dataFreshness` into the user prompt. Prompt rule 2 was rewritten to
-   grade against the injected value rather than per-signal dates, closing
-   the round 7 gap where 7-day rollup signals could not be freshness-
-   checked.
+Interactive demo. A rate-limited public control lets a judge trigger a real
+live-testnet cycle from the dashboard and watch it; no secret reaches the
+client.
 
-5. Langfuse cycle traces. `lib/utils/logger.ts:startCycleTrace` opens a
-   trace keyed by runId on every cycle, attaches the thesis (or error) as
-   output, and flushes in a finally block. /log restored the Trace column
-   linking each run to `${LANGFUSE_BASE_URL}/trace/{trace_id}`.
+NAV computation, off-chain from the on-chain tokenset times SoSoValue prices
+(27/27 tokens covered), charted vs a buy-and-hold baseline. The data-freshness
+clock is anchored to the ETF close and the daily cron runs after it, so the
+agent trades the just-closed session rather than stale data. Real Langfuse
+traces linked from Log.
 
-6. Cross-chain wallet stack. wagmi v2 + ConnectKit + React Query with
-   Base mainnet + ValueChain testnet (chainId 138565 confirmed by probe).
-   The Portfolio Balance Panel reads the connected user's USDC on Base
-   and native gas on ValueChain testnet via wagmi, and the agent hot
-   wallet's USDC on Base server-side via viem. Bridge widget foundations
-   are in place; the Mirror Protocol contract addresses are still
-   pending a Discord answer (`docs/mirror-bridge.md`).
+Cross-chain funding. The SoSoValue team confirmed there is no testnet bridge,
+so the ValueChain wallet is funded by a SoDEX testnet withdrawal; the
+three-balance panel is real. Mirror Protocol is the config-gated mainnet bridge
+design. Adaptive honesty over a faked bridge.
 
-7. Operational hardening. The production build runs under systemd
-   (`ops/systemd/sonar.service`) with Restart=always and 60s graceful
-   stop; nginx vhost is committed to repo (`ops/nginx/sonar.conf`); TLS
-   via Let's Encrypt. https://sonar.my.id survives `systemctl restart`.
-
-Every wire-side fact is traceable to either a commit on
-https://github.com/OoJae/sonar or a row in the Postgres database the
-dashboard reads from.
+Operational hardening: the app runs under systemd; https://sonar.my.id survives
+reboots and the cron fires on the production process.
 
 ### Wave 3 milestones
 
-Mirror Protocol bridge widget (foundations shipped; needs the public
-contract addresses to light up). Scoped session-key delegation so the
-agent can act on user wallets without holding keys. Production risk
-engine (VaR, drawdown caps, correlation limits). Custom SSI index
-proposals. Public read-only landing for non-wallet visitors.
+Live Mirror Protocol mainnet bridge and gated mainnet execution; a production
+risk engine (VaR, drawdown caps, correlation limits) on top of the Wave 2
+notional caps and macro breaker; scoped session-key delegation so a connected
+user authorizes the agent without a server-side hot wallet; the delta-neutral
+USSI multi-strategy module.
 
 ### Team
 

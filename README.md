@@ -360,7 +360,6 @@ recent US ETF close is more than 36 hours stale.
 - Production risk engine (VaR, drawdown caps, correlation limits) beyond
   the Wave 2 notional caps and macro breaker.
 - Custom SSI index proposals; the delta-neutral USSI multi-strategy.
-- Public read-only landing for non-wallet visitors.
 
 See [docs/wave-changelog.md](docs/wave-changelog.md) for the full
 deliverables ledger.
