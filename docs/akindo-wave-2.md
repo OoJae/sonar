@@ -59,10 +59,11 @@ live-testnet cycle from the dashboard and watch it; no secret reaches the
 client.
 
 NAV computation, off-chain from the on-chain tokenset times SoSoValue prices
-(27/27 tokens covered), charted vs a buy-and-hold baseline. The data-freshness
-clock is anchored to the ETF close and the daily cron runs after it, so the
-agent trades the just-closed session rather than stale data. Real Langfuse
-traces linked from Log.
+(27/27 tokens covered), charted vs a buy-and-hold baseline. Open positions mark
+to that same live NAV (and perps to live prices), so the Portfolio book and P&L
+are real, not placeholder-priced. The data-freshness clock is anchored to the ETF
+close and the daily cron runs after it, so the agent trades the just-closed
+session rather than stale data. Real Langfuse traces linked from Log.
 
 Cross-chain funding. The SoSoValue team confirmed there is no testnet bridge,
 so the ValueChain wallet is funded by a SoDEX testnet withdrawal; the
