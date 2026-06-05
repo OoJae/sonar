@@ -20,6 +20,35 @@ import {
 
 export const dynamic = "force-dynamic";
 
+// Real cycles finish in ~1 to 7 minutes (max observed ~418s). A run with no
+// finishedAt that started within this window is genuinely in progress; older
+// than this it is treated as stalled/crashed so a row never sits on "running".
+const RUNNING_GRACE_MS = 15 * 60 * 1000;
+
+type RunStatus = {
+  label: string;
+  variant: "default" | "destructive" | "secondary";
+  pulse: boolean;
+};
+
+function runStatus(run: {
+  ok: boolean;
+  startedAt: Date;
+  finishedAt: Date | null;
+}): RunStatus {
+  if (run.finishedAt) {
+    return run.ok
+      ? { label: "ok", variant: "default", pulse: false }
+      : { label: "failed", variant: "destructive", pulse: false };
+  }
+  // No finishedAt yet: in progress, unless it has been too long (stalled).
+  const ageMs = Date.now() - run.startedAt.getTime();
+  if (ageMs > RUNNING_GRACE_MS) {
+    return { label: "failed", variant: "destructive", pulse: false };
+  }
+  return { label: "running", variant: "secondary", pulse: true };
+}
+
 async function load() {
   try {
     const runs = await db()
@@ -118,12 +147,19 @@ export default async function LogPage() {
                         {run.dataSource}
                       </TableCell>
                       <TableCell>
-                        <Badge
-                          variant={run.ok ? "default" : "destructive"}
-                          className="mono text-[10px] uppercase tracking-[0.18em]"
-                        >
-                          {run.ok ? "ok" : "failed"}
-                        </Badge>
+                        {(() => {
+                          const status = runStatus(run);
+                          return (
+                            <Badge
+                              variant={status.variant}
+                              className={`mono text-[10px] uppercase tracking-[0.18em]${
+                                status.pulse ? " animate-pulse" : ""
+                              }`}
+                            >
+                              {status.label}
+                            </Badge>
+                          );
+                        })()}
                       </TableCell>
                       <TableCell className="mono text-xs">
                         {run.haltReason ? (
