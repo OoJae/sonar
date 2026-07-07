@@ -129,8 +129,8 @@ Endpoint: `https://token-plan-sgp.xiaomimimo.com/anthropic/v1`
 `<baseURL>/messages`. We instantiate via `createAnthropic({ apiKey, baseURL })`
 so the Messages API plus tool calls work without provider-specific code.
 
-Plan: Max Monthly, 1.6B credits valid through 2026-06-01. Off-peak window is
-16:00-24:00 UTC at 0.8x credit consumption (useful when recording the demo).
+Plan: Max Monthly (1.6B credits). Off-peak window is 16:00-24:00 UTC at 0.8x
+credit consumption (useful when recording the demo).
 Prompt caching support on the relay is unverified; do not rely on the 90%
 savings number until measured. Tool loop is capped at 16 steps per cycle by
 `stopWhen: stepCountIs(16)` in `lib/agent/runner.ts`.

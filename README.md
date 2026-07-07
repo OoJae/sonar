@@ -2,7 +2,7 @@
 
 **An ETF-flow-aware agentic hedge fund built on the SoSoValue stack.**
 
-Live at **[https://sonar.my.id](https://sonar.my.id)**.
+Live at **[https://sonar.my.id](https://sonar.my.id)**. Demo walkthrough: **[youtu.be/0vPra6lpzkQ](https://youtu.be/0vPra6lpzkQ)**.
 
 Sonar ingests SoSoValue's daily ETF flow data and structured news after every US
 market close, has an AI agent (Xiaomi MiMo V2.5 Pro) write a dated research
