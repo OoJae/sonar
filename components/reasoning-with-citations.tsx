@@ -1,5 +1,6 @@
 import { Fragment } from "react";
 import type { Thesis } from "@/lib/agent/thesis";
+import { safeHttpUrl } from "@/lib/utils/url";
 
 type Resolved = {
   id: string;
@@ -19,12 +20,12 @@ function resolveRefs(reasoning: string, thesis: Thesis): Resolved[] {
     let url: string | null = null;
     let label = id;
     if (news) {
-      url = news.url;
+      url = safeHttpUrl(news.url);
       label = news.headline;
     } else if (etf) {
       label = `${etf.asset} ETF flow (${etf.direction}, ${etf.windowDays}d)`;
     } else if (cite) {
-      url = cite.url;
+      url = safeHttpUrl(cite.url);
       label = cite.ref;
     }
     out.set(id, { id, n: out.size + 1, url, label });

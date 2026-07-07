@@ -23,6 +23,7 @@ import { ReasoningWithCitations } from "@/components/reasoning-with-citations";
 import { OrderPreview } from "@/components/order-preview";
 import { DemoRunButton } from "@/components/demo-run-button";
 import { TrackHeadline } from "@/components/track-headline";
+import { safeHttpUrl } from "@/lib/utils/url";
 import { getEtfSummaryHistory } from "@/lib/sosovalue/client";
 import type { EtfAsset } from "@/lib/agent/thesis";
 
@@ -257,20 +258,26 @@ function NewsBlock({ thesis }: { thesis: Thesis }) {
       </CardHeader>
       <CardContent>
         <ul className="space-y-3">
-          {thesis.signals.newsSignals.slice(0, 8).map((n) => (
+          {thesis.signals.newsSignals.slice(0, 8).map((n) => {
+            const href = safeHttpUrl(n.url);
+            return (
             <li
               key={n.id}
               className="flex items-start justify-between gap-4 border-b border-border/60 pb-3 last:border-b-0"
             >
               <div className="flex-1">
+                {href ? (
                 <a
-                  href={n.url}
+                  href={href}
                   target="_blank"
                   rel="noreferrer"
                   className="text-sm text-foreground hover:text-[color:var(--gold)]"
                 >
                   {n.headline}
                 </a>
+                ) : (
+                  <span className="text-sm text-foreground">{n.headline}</span>
+                )}
                 <div className="mono mt-1 text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
                   {n.currency} · {n.category}
                 </div>
@@ -282,7 +289,8 @@ function NewsBlock({ thesis }: { thesis: Thesis }) {
                 {n.stance} · {n.confidence.toFixed(2)}
               </Badge>
             </li>
-          ))}
+            );
+          })}
         </ul>
       </CardContent>
     </Card>

@@ -23,8 +23,14 @@ export async function POST(request: Request) {
   const e = env();
   const { count, windowSec } = parseRateLimit(e.SONAR_PUBLIC_RUN_RATELIMIT);
 
+  // Use X-Real-IP (nginx sets it from $remote_addr, unspoofable through the
+  // proxy). A client-supplied X-Forwarded-For prepends attacker-controlled
+  // tokens, so the first XFF token cannot be trusted for a per-IP cap; fall back
+  // to the last XFF hop only if X-Real-IP is absent.
   const ip =
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+    request.headers.get("x-real-ip")?.trim() ??
+    request.headers.get("x-forwarded-for")?.split(",").pop()?.trim() ??
+    "unknown";
 
   // Global budget plus a per-IP budget (per-IP a bit stricter window).
   const globalOk = await allowRequest("demo:global", count, windowSec);
