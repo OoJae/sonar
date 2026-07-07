@@ -16,7 +16,7 @@ import { placeOrder, getPositions, markToMarket } from "@/lib/sodex/executor";
 import { computeAllNavs } from "@/lib/ssi/nav";
 import { getEtfSummaryHistory } from "@/lib/sosovalue/client";
 import { evaluateMacroWindow, type BreakerState } from "@/lib/agent/circuit-breaker";
-import { setDeRiskFactor, clearDeRisk } from "@/lib/sodex/risk";
+import { setDeRiskFactor, clearDeRisk, resetCycle } from "@/lib/sodex/risk";
 
 // Xiaomi MiMo V2.5 Pro via its Anthropic-compatible endpoint. The @ai-sdk/
 // anthropic package handles the Messages API + tool calls; we just override
@@ -244,6 +244,9 @@ export async function runAgentCycle(opts?: {
     // Always clear the process de-risk factor so it never leaks into the next
     // cycle (the runner sets it per cycle when the breaker fires).
     clearDeRisk();
+    // Evict this cycle's per-run notional accumulator so the map does not grow
+    // unbounded across the process lifetime.
+    resetCycle(runId);
     if (trace) {
       try {
         await trace.flush();

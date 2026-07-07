@@ -15,10 +15,26 @@ const geistMono = Geist_Mono({
   display: "swap",
 });
 
+const SITE_TITLE = "Sonar: ETF-Flow-Aware Agentic Hedge Fund";
+const SITE_DESCRIPTION =
+  "An AI agent that ingests SoSoValue ETF flows and structured news, publishes dated, cited theses, rebalances SSI indices, and hedges live on SoDEX testnet with a verifiable track record.";
+
 export const metadata: Metadata = {
-  title: "Sonar: ETF-Flow-Aware Agentic Hedge Fund",
-  description:
-    "An AI agent that ingests SoSoValue ETF flows and structured news, publishes dated, cited theses, rebalances SSI indices, and hedges live on SoDEX testnet with a verifiable track record.",
+  metadataBase: new URL("https://sonar.my.id"),
+  title: SITE_TITLE,
+  description: SITE_DESCRIPTION,
+  openGraph: {
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
+    url: "https://sonar.my.id",
+    siteName: "Sonar",
+    type: "website",
+  },
+  twitter: {
+    card: "summary",
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
+  },
 };
 
 export default function RootLayout({

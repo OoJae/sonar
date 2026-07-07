@@ -5,6 +5,8 @@ import type { NextConfig } from "next";
 // tells Turbopack dev that requests reaching it via these hosts are trusted,
 // silencing the "origin not allowed" HMR warning.
 const nextConfig: NextConfig = {
+  // Do not advertise the framework/version in an X-Powered-By response header.
+  poweredByHeader: false,
   allowedDevOrigins: [
     "https://sonar.my.id",
     "http://localhost:3005",
