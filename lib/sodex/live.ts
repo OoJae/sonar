@@ -224,7 +224,10 @@ type PolledOutcome =
   | { kind: "filled"; fillPrice: number; fillQuantity: number; sodexOrderId: string | null }
   | { kind: "partially_filled"; fillPrice: number; fillQuantity: number; sodexOrderId: string | null }
   | { kind: "failed"; reason: string }
-  | { kind: "rejected"; reason: string };
+  | { kind: "rejected"; reason: string }
+  // Non-terminal: the client-side poll gave up (or a fill had no usable price).
+  // The venue may still have filled; the row is left reconcilable, NOT failed.
+  | { kind: "timeout"; sodexOrderId: string | null };
 
 async function pollUntilTerminal(
   sodexOrderId: string | null,
@@ -288,7 +291,10 @@ async function pollUntilTerminal(
   }
   // Timeout. Surface as failed; the row stays with sodexOrderId set so a
   // future manual check can reconcile.
-  return { kind: "failed", reason: "poll timeout" };
+  // Poll window elapsed with no terminal status. This is a client-side timeout,
+  // not a venue rejection: the order may still fill. Return a non-terminal
+  // timeout so the row stays "submitted" and reconcilable via sodexOrderId.
+  return { kind: "timeout", sodexOrderId };
 }
 
 // IOC partial fills come back from orders/history as status=CANCELED with a
@@ -305,12 +311,18 @@ function outcomeFromHistory(
   const resolvedSodexId = o.orderID !== undefined ? String(o.orderID) : sodexOrderId;
   if (executedQty > 0) {
     const avgFillPrice = executedValue > 0 ? executedValue / executedQty : Number(o.price ?? 0);
-    return {
-      kind: "filled",
-      fillPrice: avgFillPrice,
-      fillQuantity: executedQty,
-      sodexOrderId: resolvedSodexId,
-    };
+    if (avgFillPrice > 0) {
+      return {
+        kind: "filled",
+        fillPrice: avgFillPrice,
+        fillQuantity: executedQty,
+        sodexOrderId: resolvedSodexId,
+      };
+    }
+    // executedQty > 0 but no usable price: do NOT book a zero-price fill (it
+    // would store avgEntry 0 and book the whole mark as profit, and write
+    // notional 0). Leave it reconcilable via sodexOrderId.
+    return { kind: "timeout", sodexOrderId: resolvedSodexId };
   }
   if (o.status === "REJECTED") {
     return { kind: "rejected", reason: `SoDEX status ${o.status}` };
@@ -376,11 +388,37 @@ async function finalizeOrder(
     );
   }
 
+  if (outcome.kind === "timeout") {
+    // Not a terminal failure: leave the row "submitted" (keep sodexOrderId) so
+    // it stays reconcilable and the idempotent-retry path re-polls instead of
+    // hard-throwing on a "failed" status. Skip this leg for the cycle; the
+    // hedge loop in executeAllocations catches per-leg.
+    await db()
+      .update(schema.orders)
+      .set({ status: "submitted", sodexOrderId: outcome.sodexOrderId })
+      .where(eq(schema.orders.id, orderRowId));
+    throw new Error(
+      `SoDEX order ${clOrdID} did not confirm within the poll window; left submitted for reconciliation.`,
+    );
+  }
+
   // Update the orders row with the fill.
   const filledAt = new Date();
   const dbStatus = outcome.kind;
   const fillPrice = outcome.fillPrice;
   const fillQuantity = outcome.fillQuantity;
+  if (!(fillPrice > 0) || !(fillQuantity > 0)) {
+    // A "filled" status with no usable price/qty (e.g. the open-orders path
+    // reported zero avgPrice) is not a real fill; never book a zero-entry
+    // position. Leave submitted for reconciliation.
+    await db()
+      .update(schema.orders)
+      .set({ status: "submitted", sodexOrderId: outcome.sodexOrderId })
+      .where(eq(schema.orders.id, orderRowId));
+    throw new Error(
+      `SoDEX order ${clOrdID} reported a fill with no usable price/quantity; left submitted for reconciliation.`,
+    );
+  }
   await db()
     .update(schema.orders)
     .set({

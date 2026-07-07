@@ -119,7 +119,16 @@ async function upsertPosition(trade: ExecutedTrade): Promise<void> {
     .limit(1);
 
   const current = existing[0];
-  const delta = trade.side === "buy" ? trade.fillQuantity : -trade.fillQuantity;
+  let delta = trade.side === "buy" ? trade.fillQuantity : -trade.fillQuantity;
+
+  // Spot (SSI index) legs cannot go short in the paper book: a sell may only
+  // reduce a held long, never flip it negative. Clamp the sell to the held
+  // quantity so /portfolio never shows a nonsensical short SSI position.
+  if (trade.kind === "spot" && delta < 0) {
+    const heldLong =
+      current && current.side === "long" ? Number(current.quantity) : 0;
+    delta = Math.max(delta, -heldLong);
+  }
 
   if (!current) {
     if (delta === 0) return;
