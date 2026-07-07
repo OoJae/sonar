@@ -31,19 +31,31 @@ export type RunResult =
   | { ok: true; runId: string; thesisId: string; mode: Thesis["mode"] }
   | { ok: false; runId: string; error: string };
 
+// Process-level mutex: only one agent cycle may run at a time. Reset in the
+// runAgentCycle finally. See the guard in runAgentCycle for why.
+let cycleInFlight = false;
+
 export async function runAgentCycle(opts?: {
   universe?: UniverseKey[];
 }): Promise<RunResult> {
   const e = env();
   const universe = opts?.universe ?? DEFAULT_UNIVERSE;
 
+  // Cross-entrypoint mutex. agent/run, cron/daily, and demo-run all funnel
+  // here, and Node's event loop interleaves them across every await. Two
+  // overlapping cycles would double-place hedges (fresh thesisId per cycle
+  // defeats clOrdID idempotency), race the position upsert, leak the de-risk
+  // factor, and write duplicate NAV batches. Sonar runs as one process, so this
+  // module-level flag is a correct mutex: the check-then-set below has no await
+  // between it, so it is atomic in single-threaded JS. A Postgres advisory lock
+  // would be the multi-worker upgrade.
+  if (cycleInFlight) {
+    logger.warn("agent.cycle_already_in_flight", {});
+    return { ok: false, runId: "", error: "cycle_already_in_flight" };
+  }
+  cycleInFlight = true;
+
   const runId = randomUUID();
-  await db().insert(schema.agentRuns).values({
-    id: runId,
-    model: MODEL_ID,
-    dataSource: e.SONAR_DATA_SOURCE,
-    startedAt: new Date(),
-  });
 
   const capture: { thesis: Thesis | null } = { thesis: null };
   const tools = buildAgentTools(capture);
@@ -58,6 +70,14 @@ export async function runAgentCycle(opts?: {
   };
 
   try {
+    // Inside the try so a failed insert still resets cycleInFlight via finally.
+    await db().insert(schema.agentRuns).values({
+      id: runId,
+      model: MODEL_ID,
+      dataSource: e.SONAR_DATA_SOURCE,
+      startedAt: new Date(),
+    });
+
     if (!e.MIMO_API_KEY) {
       throw new Error("MIMO_API_KEY is not set; agent cannot run.");
     }
@@ -149,11 +169,18 @@ export async function runAgentCycle(opts?: {
       return { ok: false, runId, error: "no_thesis" };
     }
 
-    // Override the agent's id with a fresh UUID. Models often emit
-    // placeholder UUIDs (e.g. "a1b2c3d4-...") and reuse them across cycles,
-    // which would cause primary-key collisions on insert. The id is internal
-    // bookkeeping; the agent does not need to control it.
-    capture.thesis = { ...capture.thesis, id: randomUUID() };
+    // Override the agent's id and timestamps with server-controlled values.
+    // Models emit placeholder/reused UUIDs (primary-key collisions) and can
+    // emit a future-dated generatedAt, which would pin a stale thesis to the
+    // top of /signals (ordered by desc(generatedAt)) forever and mis-attribute
+    // /track batches. asOf is the runner's ETF-close freshness instant, not a
+    // model guess. The agent controls neither its id nor the clock.
+    capture.thesis = {
+      ...capture.thesis,
+      id: randomUUID(),
+      generatedAt: nowIso,
+      asOf: freshness?.asOfIso ?? nowIso,
+    };
 
     await persistThesis(runId, capture.thesis);
     // NAV snapshot per index per cycle. Runs regardless of trade/no-trade
@@ -211,6 +238,9 @@ export async function runAgentCycle(opts?: {
     await finishRun(runId, false, message);
     return { ok: false, runId, error: message };
   } finally {
+    // Release the cross-entrypoint mutex first, so the next cycle can start
+    // even if trace flushing below is slow.
+    cycleInFlight = false;
     // Always clear the process de-risk factor so it never leaks into the next
     // cycle (the runner sets it per cycle when the breaker fires).
     clearDeRisk();
