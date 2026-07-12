@@ -221,6 +221,29 @@ export const delegations = pgTable(
   }),
 );
 
+// Wave 3 custom SSI index proposals. One row per agent-generated themed basket
+// (constituents + weights + cited rationale + pricing coverage). A design
+// artifact that maps onto SSI Protocol on-chain index creation; never created
+// on-chain. Decoupled from runAgentCycle (its own on-demand generator), so no
+// agent_runs FK. The full validated object + pricing snapshot lives in payload.
+export const proposals = pgTable("proposals", {
+  id: uuid("id").primaryKey(), // app-stamped
+  theme: text("theme").notNull(),
+  name: text("name").notNull(),
+  symbol: text("symbol").notNull(),
+  generatedAt: timestamp("generated_at", { withTimezone: true }).notNull(),
+  asOf: timestamp("as_of", { withTimezone: true }).notNull(),
+  status: text("status").notNull().default("valid"),
+  coveragePriced: integer("coverage_priced").notNull().default(0),
+  coverageTotal: integer("coverage_total").notNull().default(0),
+  perUnitNavUsd: numeric("per_unit_nav_usd", { precision: 20, scale: 6 }),
+  rationale: text("rationale").notNull(),
+  payload: jsonb("payload").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
 export type AgentRunRow = typeof agentRuns.$inferSelect;
 export type ThesisRow = typeof theses.$inferSelect;
 export type SignalRow = typeof signals.$inferSelect;
@@ -229,3 +252,4 @@ export type PaperPositionRow = typeof paperPositions.$inferSelect;
 export type OrderRow = typeof orders.$inferSelect;
 export type NavSnapshotRow = typeof navSnapshots.$inferSelect;
 export type DelegationRow = typeof delegations.$inferSelect;
+export type ProposalRow = typeof proposals.$inferSelect;

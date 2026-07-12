@@ -69,6 +69,11 @@ const EnvShape = z.object({
     .string()
     .regex(/^\d+\/\d+$/)
     .default("20/60"),
+  // Rate limit for the public on-demand index-proposal generator (count/windowSec).
+  SONAR_PROPOSAL_RATELIMIT: z
+    .string()
+    .regex(/^\d+\/\d+$/)
+    .default("5/600"),
   // Macro circuit breaker lookahead window (hours). When a high-impact macro
   // event (CPI, FOMC, etc.) falls within this horizon, the agent de-risks.
   SONAR_MACRO_HALT_HORIZON_HOURS: z.coerce.number().positive().default(6),

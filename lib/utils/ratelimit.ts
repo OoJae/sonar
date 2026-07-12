@@ -53,24 +53,33 @@ export async function allowRequest(
   return true;
 }
 
-// Single-flight lock so only one demo cycle runs at a time (cost guard).
-let localLock: { until: number } | null = null;
-export async function acquireRunLock(ttlSec: number): Promise<boolean> {
+// Single-flight lock so only one generation runs at a time (cost guard). The
+// key defaults to the demo cycle; pass a distinct key (e.g. the proposal
+// generator) so separate flows do not falsely block each other.
+const DEFAULT_LOCK_KEY = "sonar:demo:lock";
+const localLocks = new Map<string, { until: number }>();
+export async function acquireRunLock(
+  ttlSec: number,
+  key: string = DEFAULT_LOCK_KEY,
+): Promise<boolean> {
   const r = getRedis();
   if (r) {
-    const ok = await r.set("sonar:demo:lock", "1", { nx: true, ex: ttlSec });
+    const ok = await r.set(key, "1", { nx: true, ex: ttlSec });
     return ok === "OK";
   }
   const now = Date.now();
-  if (localLock && localLock.until > now) return false;
-  localLock = { until: now + ttlSec * 1000 };
+  const existing = localLocks.get(key);
+  if (existing && existing.until > now) return false;
+  localLocks.set(key, { until: now + ttlSec * 1000 });
   return true;
 }
-export async function releaseRunLock(): Promise<void> {
+export async function releaseRunLock(
+  key: string = DEFAULT_LOCK_KEY,
+): Promise<void> {
   const r = getRedis();
   if (r) {
-    await r.del("sonar:demo:lock");
+    await r.del(key);
     return;
   }
-  localLock = null;
+  localLocks.delete(key);
 }
