@@ -67,8 +67,19 @@ const STATIC_MAP: Record<string, MarketResolution> = {
   "SOL-PERP": { tradeable: true, kind: "perp", symbolName: "SOL-USD" },
 };
 
+// The venue-symbol spelling ("<base>-USD") collapses onto the canonical perp
+// key. The LLM directional hedges and the delta-neutral short both emit the
+// venue spelling; without this they would throw here in live-testnet. This
+// mirrors the canonical/venue split in lib/delegation/grant.ts canonicalMarket.
+const VENUE_ALIASES: Record<string, string> = {
+  "BTC-USD": "BTC-PERP",
+  "ETH-USD": "ETH-PERP",
+  "SOL-USD": "SOL-PERP",
+};
+
 export function resolveMarket(sonarMarket: string): MarketResolution {
-  const hit = STATIC_MAP[sonarMarket];
+  const key = VENUE_ALIASES[sonarMarket] ?? sonarMarket;
+  const hit = STATIC_MAP[key];
   if (hit) return hit;
   // Anything not in the map is a hard configuration error, not a silent
   // skip; the runner shouldn't be producing orders for markets we haven't

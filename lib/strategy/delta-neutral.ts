@@ -20,7 +20,7 @@ import type { OrderRequestInput, PaperPosition } from "@/lib/sodex/types";
 
 const STRATEGY = "delta-neutral" as const;
 const LONG_MARKET = "MAG7.ssi";
-const SHORT_MARKET = "BTC-USD";
+const SHORT_MARKET = "BTC-PERP";
 const DUST_USD = 10;
 // Fallback if the on-chain tokenset does not expose a recognizable BTC symbol.
 const FALLBACK_BTC_WEIGHT = 0.4;
