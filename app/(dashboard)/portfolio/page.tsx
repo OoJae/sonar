@@ -26,6 +26,40 @@ export const dynamic = "force-dynamic";
 
 type NavSeries = Record<string, NavPoint[]>;
 
+type Position = Awaited<ReturnType<typeof getPositions>>[number];
+
+type StrategyStats = {
+  longUsd: number;
+  shortUsd: number;
+  netUsd: number; // long - short (net market exposure)
+  grossUsd: number; // long + short (capital deployed across both legs)
+  unrealized: number;
+  count: number;
+};
+
+// quantity is stored as a magnitude (the sign lives in `side`), so
+// markPrice * quantity is non-negative and summing by side yields long/short
+// dollars; unrealizedPnlUSD already carries its own sign.
+function strategyStats(ps: Position[]): StrategyStats {
+  let longUsd = 0;
+  let shortUsd = 0;
+  let unrealized = 0;
+  for (const p of ps) {
+    const mv = p.markPrice * p.quantity;
+    if (p.side === "long") longUsd += mv;
+    else shortUsd += mv;
+    unrealized += p.unrealizedPnlUSD;
+  }
+  return {
+    longUsd,
+    shortUsd,
+    netUsd: longUsd - shortUsd,
+    grossUsd: longUsd + shortUsd,
+    unrealized,
+    count: ps.length,
+  };
+}
+
 async function loadNavSeries(): Promise<NavSeries> {
   try {
     const rows = await db()
@@ -70,11 +104,13 @@ export default async function PortfolioPage() {
   const { positions, trades, error } = await load();
   const navSeries = await loadNavSeries();
   const agentBalances = await getAgentBalances();
-  const equity = positions.reduce(
-    (acc, p) => acc + p.markPrice * p.quantity,
-    0,
-  );
-  const unrealized = positions.reduce((acc, p) => acc + p.unrealizedPnlUSD, 0);
+  const directional = positions.filter((p) => p.strategy === "directional");
+  const deltaNeutral = positions.filter((p) => p.strategy === "delta-neutral");
+  const dirStats = strategyStats(directional);
+  const dnStats = strategyStats(deltaNeutral);
+  const netExposure = dirStats.netUsd + dnStats.netUsd;
+  const unrealized = dirStats.unrealized + dnStats.unrealized;
+  const openCount = directional.length + deltaNeutral.length;
 
   return (
     <div className="space-y-10">
@@ -100,17 +136,19 @@ export default async function PortfolioPage() {
           fire as EIP-712 signed orders on SoDEX testnet; SSI rebalance legs are
           recorded against the book. The executor speaks one contract, so the
           mode badge above is the only thing that changes between paper and live.
+          Two strategies now run side by side, each keeping its own isolated book:
+          a directional SSI rotation and a rules-based delta-neutral carry.
         </p>
       </div>
 
       <div className="grid gap-6 md:grid-cols-3">
-        <StatCard label="Book equity" value={formatUSD(equity)} />
+        <StatCard label="Net exposure" value={formatUSD(netExposure)} />
         <StatCard
           label="Unrealized P&L"
           value={`${unrealized >= 0 ? "+" : ""}${formatUSD(unrealized)}`}
           tone={unrealized >= 0 ? "positive" : "negative"}
         />
-        <StatCard label="Open positions" value={String(positions.length)} />
+        <StatCard label="Open positions" value={String(openCount)} />
       </div>
 
       <BalancePanel agent={agentBalances} />
@@ -133,7 +171,26 @@ export default async function PortfolioPage() {
         </Card>
       ) : (
         <>
-          <PositionsTable positions={positions} />
+          <div className="space-y-6">
+            <StrategySection
+              title="Directional"
+              tag="SSI rotation"
+              description="ETF-flow-driven rotation across the SSI baskets; long only, weights follow the daily thesis."
+              stats={dirStats}
+              positions={directional}
+              emptyCopy="No directional positions yet. Run a cycle to generate a thesis and rebalance."
+            />
+            <StrategySection
+              title="Delta-neutral"
+              tag="rules-based carry"
+              accent
+              showNeutrality
+              description="Long the basket, short a sized BTC perp, so net crypto beta is about zero."
+              stats={dnStats}
+              positions={deltaNeutral}
+              emptyCopy="Establishes its book on the next priced cycle: long the MAG7 basket, short a BTC-USD perp sized to the basket BTC weight, net crypto beta about zero."
+            />
+          </div>
           <TradesTable trades={trades} />
         </>
       )}
@@ -168,66 +225,145 @@ function StatCard({
   );
 }
 
-function PositionsTable({
-  positions,
+function StatChip({
+  label,
+  value,
+  tone,
 }: {
-  positions: Awaited<ReturnType<typeof getPositions>>;
+  label: string;
+  value: string;
+  tone?: "positive" | "negative" | "accent";
+}) {
+  const toneClass =
+    tone === "positive"
+      ? "text-[color:var(--positive)]"
+      : tone === "negative"
+      ? "text-[color:var(--negative)]"
+      : tone === "accent"
+      ? "text-accent"
+      : "text-foreground";
+  return (
+    <span className="inline-flex items-baseline gap-1.5 rounded-md border border-border/60 bg-card/40 px-2.5 py-1">
+      <span className="mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground">
+        {label}
+      </span>
+      <span className={`mono text-xs ${toneClass}`}>{value}</span>
+    </span>
+  );
+}
+
+function StrategySection({
+  title,
+  tag,
+  description,
+  stats,
+  positions,
+  emptyCopy,
+  accent = false,
+  showNeutrality = false,
+}: {
+  title: string;
+  tag: string;
+  description: string;
+  stats: StrategyStats;
+  positions: Position[];
+  emptyCopy: string;
+  accent?: boolean;
+  showNeutrality?: boolean;
 }) {
   return (
     <Card className="bg-card/70">
-      <CardHeader>
-        <CardTitle className="text-base">Positions</CardTitle>
+      <CardHeader className="gap-3">
+        <div className="flex items-center gap-2">
+          <CardTitle className="text-base">{title}</CardTitle>
+          <Badge
+            variant="outline"
+            className={`mono text-[10px] uppercase tracking-[0.16em] ${
+              accent ? "text-accent" : "text-muted-foreground"
+            }`}
+          >
+            {tag}
+          </Badge>
+        </div>
+        <CardDescription>{description}</CardDescription>
+        <div className="flex flex-wrap gap-2">
+          {showNeutrality ? (
+            <>
+              <StatChip label="Long" value={formatUSD(stats.longUsd)} />
+              <StatChip label="Short" value={formatUSD(stats.shortUsd)} />
+              <StatChip
+                label="Net"
+                value={formatUSD(stats.netUsd)}
+                tone="accent"
+              />
+            </>
+          ) : (
+            <StatChip label="Net exposure" value={formatUSD(stats.netUsd)} />
+          )}
+          <StatChip
+            label="Unrealized"
+            value={`${stats.unrealized >= 0 ? "+" : ""}${formatUSD(
+              stats.unrealized,
+            )}`}
+            tone={stats.unrealized >= 0 ? "positive" : "negative"}
+          />
+          <StatChip label="Positions" value={String(stats.count)} />
+        </div>
       </CardHeader>
       <CardContent>
         {positions.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No open positions. Run the agent to generate a thesis and rebalance.
-          </p>
+          <p className="text-sm text-muted-foreground">{emptyCopy}</p>
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Market</TableHead>
-                <TableHead>Side</TableHead>
-                <TableHead className="text-right">Qty</TableHead>
-                <TableHead className="text-right">Avg entry</TableHead>
-                <TableHead className="text-right">Mark</TableHead>
-                <TableHead className="text-right">Unrealized</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {positions.map((p) => (
-                <TableRow key={p.market}>
-                  <TableCell className="mono">{p.market}</TableCell>
-                  <TableCell className="mono uppercase text-xs tracking-[0.16em] text-muted-foreground">
-                    {p.side}
-                  </TableCell>
-                  <TableCell className="mono text-right">
-                    {p.quantity.toFixed(4)}
-                  </TableCell>
-                  <TableCell className="mono text-right">
-                    {formatUSD(p.avgEntryPrice)}
-                  </TableCell>
-                  <TableCell className="mono text-right">
-                    {formatUSD(p.markPrice)}
-                  </TableCell>
-                  <TableCell
-                    className={`mono text-right ${
-                      p.unrealizedPnlUSD >= 0
-                        ? "text-[color:var(--positive)]"
-                        : "text-[color:var(--negative)]"
-                    }`}
-                  >
-                    {p.unrealizedPnlUSD >= 0 ? "+" : ""}
-                    {formatUSD(p.unrealizedPnlUSD)}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <PositionsTable positions={positions} />
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function PositionsTable({ positions }: { positions: Position[] }) {
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Market</TableHead>
+          <TableHead>Side</TableHead>
+          <TableHead className="text-right">Qty</TableHead>
+          <TableHead className="text-right">Avg entry</TableHead>
+          <TableHead className="text-right">Mark</TableHead>
+          <TableHead className="text-right">Unrealized</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {positions.map((p) => (
+          <TableRow key={p.market}>
+            <TableCell className="mono">{p.market}</TableCell>
+            <TableCell className="mono uppercase text-xs tracking-[0.16em] text-muted-foreground">
+              {p.side}
+            </TableCell>
+            <TableCell className="mono text-right">
+              {p.quantity.toFixed(4)}
+            </TableCell>
+            <TableCell className="mono text-right">
+              {formatUSD(p.avgEntryPrice)}
+            </TableCell>
+            <TableCell className="mono text-right">
+              {formatUSD(p.markPrice)}
+            </TableCell>
+            <TableCell
+              className={`mono text-right ${
+                p.unrealizedPnlUSD >= 0
+                  ? "text-[color:var(--positive)]"
+                  : "text-[color:var(--negative)]"
+              }`}
+            >
+              {p.unrealizedPnlUSD >= 0 ? "+" : ""}
+              {formatUSD(p.unrealizedPnlUSD)}
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
 }
 
@@ -277,7 +413,20 @@ function TradesTable({
                         .replace("T", " ")
                         .slice(5, 16)}
                     </TableCell>
-                    <TableCell className="mono">{t.market}</TableCell>
+                    <TableCell className="mono">
+                      <div className="flex flex-col leading-tight">
+                        <span>{t.market}</span>
+                        <span
+                          className={`mono text-[9px] uppercase tracking-[0.14em] ${
+                            t.strategy === "delta-neutral"
+                              ? "text-accent"
+                              : "text-muted-foreground"
+                          }`}
+                        >
+                          {t.strategy}
+                        </span>
+                      </div>
+                    </TableCell>
                     <TableCell className="mono uppercase text-xs tracking-[0.16em] text-muted-foreground">
                       {t.side}
                     </TableCell>
