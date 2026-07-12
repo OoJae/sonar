@@ -174,8 +174,9 @@ export async function computeRiskMetrics(
     ),
   );
 
-  // Current exposure from the (directional) paper book.
-  const positions = await getPositions().catch(() => []);
+  // Current exposure from the directional paper book only (the delta-neutral
+  // strategy keeps its own book; /risk governs the directional strategy).
+  const positions = await getPositions("directional").catch(() => []);
   const mvByIndex = new Map<RiskIndexKey | "USSI", number>();
   for (const p of positions) {
     const idx =

@@ -18,6 +18,8 @@ import { getEtfSummaryHistory } from "@/lib/sosovalue/client";
 import { evaluateMacroWindow, type BreakerState } from "@/lib/agent/circuit-breaker";
 import { setDeRiskFactor, clearDeRisk, resetCycle } from "@/lib/sodex/risk";
 import { evaluateDrawdownGuard } from "@/lib/risk/governance";
+import { persistThesis } from "./persist";
+import { runDeltaNeutral } from "@/lib/strategy/delta-neutral";
 
 // Xiaomi MiMo V2.5 Pro via its Anthropic-compatible endpoint. The @ai-sdk/
 // anthropic package handles the Messages API + tool calls; we just override
@@ -217,6 +219,17 @@ export async function runAgentCycle(opts?: {
       await executeAllocations(capture.thesis, combinedDeRisk);
     }
 
+    // Wave 3: run the rules-based delta-neutral strategy alongside the
+    // directional one in the same cycle (its own book, same run guard). It is a
+    // market-neutral carry trade independent of the directional trade/no-trade
+    // mode, sized by the same combined de-risk factor, and skips gracefully when
+    // it cannot price. Non-fatal.
+    await runDeltaNeutral(runId, combinedDeRisk).catch((err) =>
+      logger.warn("agent.delta_neutral_failed", {
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+
     // Refresh every position mark to a live price each cycle (consistent with
     // the NAV snapshot just persisted), so /portfolio never shows stale or
     // placeholder marks. Non-fatal: a stale mark beats a failed cycle.
@@ -306,38 +319,6 @@ async function finishRun(
     .where(eq(schema.agentRuns.id, runId));
 }
 
-async function persistThesis(runId: string, thesis: Thesis): Promise<void> {
-  await db().insert(schema.theses).values({
-    id: thesis.id,
-    runId,
-    generatedAt: new Date(thesis.generatedAt),
-    asOf: new Date(thesis.asOf),
-    mode: thesis.mode,
-    status: "valid",
-    reasoning: thesis.reasoning,
-    payload: thesis,
-  });
-
-  const signalRows = [
-    ...thesis.signals.etfFlowSignal.map((s) => ({
-      id: s.id,
-      thesisId: thesis.id,
-      kind: "etf_flow",
-      payload: s,
-      sourceEndpoint: s.sourceEndpoint,
-    })),
-    ...thesis.signals.newsSignals.map((s) => ({
-      id: s.id,
-      thesisId: thesis.id,
-      kind: "news",
-      payload: s,
-      sourceEndpoint: null,
-    })),
-  ];
-  if (signalRows.length > 0) {
-    await db().insert(schema.signals).values(signalRows);
-  }
-}
 
 // ETF flow rows carry a bare calendar date with no intraday time, and the
 // figures are finalized at the US market close (roughly 20:00 to 21:00 UTC). We

@@ -16,7 +16,7 @@
 //   Both normalized to 100 at inception, so the gap is active rebalancing vs
 //   static hold. Honest framing: paper plus testnet during the buildathon.
 
-import { asc } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { db, schema } from "@/lib/db/client";
 
 type IndexKey = "MAG7" | "DEFI" | "MEME" | "USSI";
@@ -114,6 +114,9 @@ export async function computeTrackData(): Promise<TrackData> {
       payload: schema.theses.payload,
     })
     .from(schema.theses)
+    // Directional book only: the delta-neutral strategy has its own thesis rows
+    // (Wave 3) and must not become a governing thesis for this reconstruction.
+    .where(eq(schema.theses.strategy, "directional"))
     .orderBy(asc(schema.theses.generatedAt));
 
   const theses: ThesisRow[] = thesisRows.map((t) => ({
