@@ -9,6 +9,7 @@ import {
   boolean,
   pgEnum,
   primaryKey,
+  index,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -181,6 +182,45 @@ export const navSnapshots = pgTable("nav_snapshots", {
     .notNull(),
 });
 
+// Wave 3 session-key delegation. One row per signed EIP-712 SessionGrant: a
+// user authorizes the agent's session key to trade a scoped set of markets up
+// to a per-order notional, until an expiry, revocably. Enforced app-side at the
+// executor when SONAR_REQUIRE_DELEGATION is on. "Active" is derived, not stored:
+// revokedAt IS NULL AND supersededAt IS NULL AND expiresAt > now().
+export const delegations = pgTable(
+  "delegations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    // Lowercased 0x addresses; compared checksum-insensitively.
+    grantor: text("grantor").notNull(),
+    sessionKey: text("session_key").notNull(),
+    // Canonical executor-entry market tokens (MAG7.ssi, BTC-PERP, ...).
+    allowedMarkets: jsonb("allowed_markets").notNull(),
+    maxNotionalPerOrderUsd: numeric("max_notional_per_order_usd", {
+      precision: 20,
+      scale: 6,
+    }).notNull(),
+    chainId: integer("chain_id").notNull().default(8453),
+    // uint256 nonce as text to avoid bigint precision loss.
+    nonce: text("nonce").notNull(),
+    // 0x + 130 hex. Unique => idempotent re-POST, replay-safe.
+    signature: text("signature").notNull().unique(),
+    signedAt: timestamp("signed_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    revokeSignature: text("revoke_signature"),
+    supersededAt: timestamp("superseded_at", { withTimezone: true }),
+    supersededBy: uuid("superseded_by"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => ({
+    sessionKeyIdx: index("delegations_session_key_idx").on(t.sessionKey),
+    grantorIdx: index("delegations_grantor_idx").on(t.grantor),
+  }),
+);
+
 export type AgentRunRow = typeof agentRuns.$inferSelect;
 export type ThesisRow = typeof theses.$inferSelect;
 export type SignalRow = typeof signals.$inferSelect;
@@ -188,3 +228,4 @@ export type PaperTradeRow = typeof paperTrades.$inferSelect;
 export type PaperPositionRow = typeof paperPositions.$inferSelect;
 export type OrderRow = typeof orders.$inferSelect;
 export type NavSnapshotRow = typeof navSnapshots.$inferSelect;
+export type DelegationRow = typeof delegations.$inferSelect;

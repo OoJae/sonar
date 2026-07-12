@@ -57,6 +57,18 @@ const EnvShape = z.object({
     .transform((v) => v === "true"),
   SONAR_MAX_NOTIONAL_PER_ORDER: z.coerce.number().positive().default(500),
   SONAR_MAX_NOTIONAL_PER_CYCLE: z.coerce.number().positive().default(2000),
+  // Wave 3 session-key delegation. When "true", every order must be covered by
+  // an active user-signed grant to the agent session key or the executor blocks
+  // it. Default off so the autonomous cron trades under operator authority as
+  // before. Toggling requires an app restart (env() is cached), like the mode.
+  SONAR_REQUIRE_DELEGATION: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((v) => v === "true"),
+  SONAR_DELEGATION_RATELIMIT: z
+    .string()
+    .regex(/^\d+\/\d+$/)
+    .default("20/60"),
   // Macro circuit breaker lookahead window (hours). When a high-impact macro
   // event (CPI, FOMC, etc.) falls within this horizon, the agent de-risks.
   SONAR_MACRO_HALT_HORIZON_HOURS: z.coerce.number().positive().default(6),
@@ -142,6 +154,17 @@ const EnvSchema = EnvShape.superRefine((cfg, ctx) => {
       code: "custom",
       path: ["SODEX_WALLET_PRIVATE_KEY"],
       message: `SODEX_WALLET_PRIVATE_KEY is required when SONAR_EXECUTION_MODE=${cfg.SONAR_EXECUTION_MODE}`,
+    });
+  }
+
+  // Requiring delegation needs the hot wallet key so the agent session key
+  // (getSignerAddress()) is derivable inside the enforcement gate.
+  if (cfg.SONAR_REQUIRE_DELEGATION && !cfg.SODEX_WALLET_PRIVATE_KEY) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["SODEX_WALLET_PRIVATE_KEY"],
+      message:
+        "SODEX_WALLET_PRIVATE_KEY is required when SONAR_REQUIRE_DELEGATION=true (the session key is derived from it)",
     });
   }
 

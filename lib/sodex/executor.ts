@@ -27,6 +27,7 @@ import { logger } from "@/lib/utils/logger";
 import { resolveMarket } from "./markets";
 import * as paper from "./paper";
 import * as live from "./live";
+import { assertOrderDelegated } from "@/lib/delegation/store";
 import type { ExecutedTrade, OrderRequestInput } from "./types";
 
 export { getPositions, markToMarket, recentTrades, tradesForThesis } from "./paper";
@@ -34,6 +35,15 @@ export { getPositions, markToMarket, recentTrades, tradesForThesis } from "./pap
 export async function placeOrder(
   req: OrderRequestInput,
 ): Promise<ExecutedTrade> {
+  // Wave 3 session-key delegation gate. When enforcement is on, every order
+  // (paper, live, and the SSI-paper-fallback below) must be covered by an active
+  // user-signed grant to the agent session key, or this throws before anything
+  // is placed. Off by default, so this is a no-op for the autonomous cron. Runs
+  // before the mode switch on the raw req.market (the grant scope vocabulary).
+  if (env().SONAR_REQUIRE_DELEGATION) {
+    await assertOrderDelegated(req);
+  }
+
   const mode = env().SONAR_EXECUTION_MODE;
 
   if (mode === "live-mainnet") {
