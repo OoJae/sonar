@@ -18,11 +18,16 @@ export type NavPoint = { asOf: string; nav: number };
 export function NavChart({
   data,
   label,
+  format = "usd",
 }: {
   data: NavPoint[];
   label: string;
+  // "usd" renders $-prefixed prices; "index" renders bare index values
+  // (e.g. an arena curve normalized to 100, where "$100" would read as a price).
+  format?: "usd" | "index";
 }) {
   const [hover, setHover] = useState<number | null>(null);
+  const fmt = format === "index" ? formatIndex : formatNav;
 
   if (data.length === 0) {
     return (
@@ -95,7 +100,7 @@ export function NavChart({
               fontSize={10}
               fill="var(--muted-foreground)"
             >
-              {formatNav(t)}
+              {fmt(t)}
             </text>
           </g>
         ))}
@@ -175,7 +180,7 @@ export function NavChart({
               fontSize={11}
               fill="var(--foreground)"
             >
-              {formatNav(data[hover]?.nav ?? 0)}
+              {fmt(data[hover]?.nav ?? 0)}
             </text>
           </g>
         )}
@@ -209,6 +214,11 @@ function makeYTicks(min: number, max: number, count: number): number[] {
     ticks.push(min + ((max - min) * i) / count);
   }
   return ticks;
+}
+
+function formatIndex(n: number): string {
+  if (Math.abs(n) >= 100) return n.toFixed(1);
+  return n.toFixed(2);
 }
 
 function formatNav(n: number): string {

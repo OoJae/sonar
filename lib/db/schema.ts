@@ -265,6 +265,39 @@ export const dnSnapshots = pgTable("dn_snapshots", {
     .notNull(),
 });
 
+// Wave 3+ proposal arena: one row per proposal per daily cycle, capturing the
+// basket's pricing so each AI-designed index accrues a FORWARD test from its
+// creation. marks (per-symbol {symbol, weight, priceUsd}) is load-bearing: the
+// indexed curve chain-links per-period returns over the intersection of symbols
+// priced in consecutive snapshots (the lib/track/compute.ts methodology), so a
+// symbol dropping out of coverage cannot fake a return.
+export const proposalSnapshots = pgTable(
+  "proposal_snapshots",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    proposalId: uuid("proposal_id")
+      .notNull()
+      .references(() => proposals.id, { onDelete: "cascade" }),
+    perUnitNavUsd: numeric("per_unit_nav_usd", { precision: 20, scale: 6 }),
+    pricedWeight: numeric("priced_weight", { precision: 10, scale: 6 })
+      .notNull()
+      .default(sql`0`),
+    priced: integer("priced").notNull().default(0),
+    total: integer("total").notNull().default(0),
+    marks: jsonb("marks").notNull(),
+    asOf: timestamp("as_of", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => ({
+    byProposal: index("proposal_snapshots_proposal_as_of_idx").on(
+      t.proposalId,
+      t.asOf,
+    ),
+  }),
+);
+
 // Telegram subscribers (users who sent /start to the bot). chat_id is BIGINT:
 // Telegram ids exceed int32. Broadcast marks blocked users inactive (403).
 export const telegramSubscribers = pgTable("telegram_subscribers", {
@@ -286,3 +319,4 @@ export type DelegationRow = typeof delegations.$inferSelect;
 export type ProposalRow = typeof proposals.$inferSelect;
 export type DnSnapshotRow = typeof dnSnapshots.$inferSelect;
 export type TelegramSubscriberRow = typeof telegramSubscribers.$inferSelect;
+export type ProposalSnapshotRow = typeof proposalSnapshots.$inferSelect;

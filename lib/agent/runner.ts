@@ -21,6 +21,7 @@ import { evaluateDrawdownGuard } from "@/lib/risk/governance";
 import { persistThesis } from "./persist";
 import { runDeltaNeutral } from "@/lib/strategy/delta-neutral";
 import { notifyCycleFinished } from "@/lib/notify/cycle";
+import { repriceArena } from "@/lib/proposals/arena";
 
 // Xiaomi MiMo V2.5 Pro via its Anthropic-compatible endpoint. The @ai-sdk/
 // anthropic package handles the Messages API + tool calls; we just override
@@ -212,6 +213,15 @@ export async function runAgentCycle(opts?: {
     // failed cycle. See lib/ssi/nav.ts.
     await persistNavSnapshots().catch((err) =>
       logger.warn("agent.nav_persist_failed", {
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+
+    // Proposal arena: reprice every recent AI-designed index so each accrues
+    // its daily forward-test snapshot (skips proposals snapshotted <20h ago,
+    // so demo-run clicks cannot densify curves). Non-fatal.
+    await repriceArena().catch((err) =>
+      logger.warn("agent.arena_reprice_failed", {
         error: err instanceof Error ? err.message : String(err),
       }),
     );

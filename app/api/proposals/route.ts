@@ -10,6 +10,7 @@ import {
 import { logger } from "@/lib/utils/logger";
 import { generateProposal } from "@/lib/proposals/generate";
 import { persistProposal, listProposals } from "@/lib/proposals/store";
+import { insertProposalSnapshot } from "@/lib/proposals/arena";
 import { notifyProposalCreated } from "@/lib/notify/cycle";
 
 export const runtime = "nodejs";
@@ -100,6 +101,16 @@ export async function POST(request: Request) {
       return NextResponse.json(result, { status: 502 });
     }
     await persistProposal(result.proposal);
+    // Arena seed: the creation-time pricing is forward-test snapshot #1
+    // (zero extra API calls; inception = creation).
+    await insertProposalSnapshot(
+      result.proposal.id,
+      result.proposal.pricing,
+    ).catch((err) =>
+      logger.warn("proposal.seed_snapshot_failed", {
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
     // Fire-and-forget Telegram announcement (never blocks the response).
     notifyProposalCreated({
       name: result.proposal.name,

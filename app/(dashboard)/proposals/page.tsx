@@ -16,7 +16,9 @@ import {
 } from "@/components/ui/table";
 import { ProposalForm } from "@/components/proposal-form";
 import { ProposalCitations } from "@/components/proposal-citations";
+import { NavChart } from "@/components/nav-chart";
 import { listProposals } from "@/lib/proposals/store";
+import { computeArena, type ArenaEntry } from "@/lib/proposals/arena";
 import type { StoredProposal } from "@/lib/proposals/schema";
 import { SSI_PROTOCOL } from "@/lib/ssi/addresses";
 
@@ -30,6 +32,14 @@ function formatPrice(n: number): string {
 
 export default async function ProposalsPage() {
   const proposals = await listProposals();
+  const arena = await computeArena(proposals.map((p) => p.id));
+  const ranked = proposals
+    .map((p) => ({ p, entry: arena.get(p.id) }))
+    .filter(
+      (x): x is { p: StoredProposal; entry: ArenaEntry } =>
+        x.entry !== undefined && x.entry.returnSincePct !== null,
+    )
+    .sort((a, b) => b.entry.returnSincePct! - a.entry.returnSincePct!);
 
   return (
     <div className="space-y-10">
@@ -60,6 +70,44 @@ export default async function ProposalsPage() {
 
       <ProposalForm />
 
+      {ranked.length > 0 ? (
+        <Card className="bg-card/70">
+          <CardHeader>
+            <CardTitle className="text-base">Forward-test leaderboard</CardTitle>
+            <CardDescription>
+              Every proposal accrues a daily paper-priced forward test from the
+              moment it is designed (indexed to 100 at creation). A design that
+              cannot survive its own forward test does not deserve a tokenset.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap gap-2">
+              {ranked.map(({ p, entry }, i) => (
+                <span
+                  key={p.id}
+                  className="inline-flex items-baseline gap-2 rounded-md border border-border/60 bg-card/40 px-3 py-1.5"
+                >
+                  <span className="mono text-[10px] text-muted-foreground">
+                    #{i + 1}
+                  </span>
+                  <span className="mono text-xs text-accent">{p.symbol}</span>
+                  <span
+                    className={`mono text-xs ${
+                      entry.returnSincePct! >= 0
+                        ? "text-[color:var(--positive)]"
+                        : "text-[color:var(--negative)]"
+                    }`}
+                  >
+                    {entry.returnSincePct! >= 0 ? "+" : ""}
+                    {entry.returnSincePct!.toFixed(2)}%
+                  </span>
+                </span>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
       {proposals.length === 0 ? (
         <Card className="bg-card/70">
           <CardHeader>
@@ -72,7 +120,7 @@ export default async function ProposalsPage() {
       ) : (
         <div className="space-y-6">
           {proposals.map((p) => (
-            <ProposalCard key={p.id} p={p} />
+            <ProposalCard key={p.id} p={p} entry={arena.get(p.id)} />
           ))}
         </div>
       )}
@@ -80,7 +128,13 @@ export default async function ProposalsPage() {
   );
 }
 
-function ProposalCard({ p }: { p: StoredProposal }) {
+function ProposalCard({
+  p,
+  entry,
+}: {
+  p: StoredProposal;
+  entry?: ArenaEntry;
+}) {
   const priceBySymbol = new Map(p.pricing.marks.map((m) => [m.symbol, m.priceUsd]));
   const nav = p.pricing.perUnitNavUsd;
   return (
@@ -110,6 +164,13 @@ function ProposalCard({ p }: { p: StoredProposal }) {
             tone={nav === null ? undefined : "accent"}
           />
           <StatChip label="Constituents" value={String(p.constituents.length)} />
+          {entry && entry.returnSincePct !== null ? (
+            <StatChip
+              label="Forward test"
+              value={`${entry.returnSincePct >= 0 ? "+" : ""}${entry.returnSincePct.toFixed(2)}%`}
+              tone="accent"
+            />
+          ) : null}
         </div>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -146,6 +207,20 @@ function ProposalCard({ p }: { p: StoredProposal }) {
             })}
           </TableBody>
         </Table>
+
+        {entry && entry.points.length >= 2 ? (
+          <div>
+            <div className="mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground mb-2">
+              Forward test since creation (indexed to 100; paper-priced, not
+              investable)
+            </div>
+            <NavChart
+              data={entry.points.map((pt) => ({ asOf: pt.asOf, nav: pt.value }))}
+              label={`${p.symbol} forward test`}
+              format="index"
+            />
+          </div>
+        ) : null}
 
         <div>
           <ProposalCitations
