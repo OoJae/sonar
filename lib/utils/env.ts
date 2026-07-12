@@ -74,6 +74,11 @@ const EnvShape = z.object({
     .string()
     .regex(/^\d+\/\d+$/)
     .default("5/600"),
+  // Per-IP rate limit for the public read-only API v1 (count/windowSec).
+  SONAR_API_RATELIMIT: z
+    .string()
+    .regex(/^\d+\/\d+$/)
+    .default("120/60"),
   // Macro circuit breaker lookahead window (hours). When a high-impact macro
   // event (CPI, FOMC, etc.) falls within this horizon, the agent de-risks.
   SONAR_MACRO_HALT_HORIZON_HOURS: z.coerce.number().positive().default(6),

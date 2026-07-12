@@ -1,4 +1,4 @@
-import { desc } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { db, schema } from "@/lib/db/client";
 import { ThesisSchema, type Thesis } from "@/lib/agent/thesis";
 import {
@@ -34,6 +34,10 @@ async function loadLatestThesis(): Promise<Thesis | null> {
     const rows = await db()
       .select()
       .from(schema.theses)
+      // The research note is the directional thesis; the delta-neutral strategy
+      // persists its own synthetic (schema-valid) theses moments later each
+      // rebalance cycle and must not shadow it here.
+      .where(eq(schema.theses.strategy, "directional"))
       .orderBy(desc(schema.theses.generatedAt))
       .limit(1);
     const row = rows[0];

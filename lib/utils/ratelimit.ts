@@ -29,7 +29,19 @@ export function parseRateLimit(spec: string): { count: number; windowSec: number
 }
 
 // Fixed-window limiter. Returns true if the request is within budget.
-const localWindows = new Map<string, { windowStart: number; count: number }>();
+const localWindows = new Map<
+  string,
+  { windowStart: number; count: number; windowMs: number }
+>();
+// Per-IP keys on the public API would otherwise grow the Map unboundedly in the
+// no-Redis path; sweep expired windows once the Map gets large.
+const SWEEP_THRESHOLD = 5000;
+function sweepExpiredWindows(now: number): void {
+  if (localWindows.size <= SWEEP_THRESHOLD) return;
+  for (const [k, w] of localWindows) {
+    if (now - w.windowStart > w.windowMs) localWindows.delete(k);
+  }
+}
 export async function allowRequest(
   key: string,
   count: number,
@@ -43,9 +55,14 @@ export async function allowRequest(
     return n <= count;
   }
   const now = Date.now();
+  sweepExpiredWindows(now);
   const w = localWindows.get(key);
   if (!w || now - w.windowStart > windowSec * 1000) {
-    localWindows.set(key, { windowStart: now, count: 1 });
+    localWindows.set(key, {
+      windowStart: now,
+      count: 1,
+      windowMs: windowSec * 1000,
+    });
     return true;
   }
   if (w.count >= count) return false;
