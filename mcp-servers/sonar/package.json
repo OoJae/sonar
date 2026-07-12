@@ -1,0 +1,12 @@
+{
+  "name": "@sonar/mcp-sonar",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "sonar-mcp": "./index.ts"
+  },
+  "scripts": {
+    "start": "tsx index.ts"
+  }
+}
