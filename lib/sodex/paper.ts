@@ -6,8 +6,9 @@ import { db, schema } from "@/lib/db/client";
 import {
   OrderRequestSchema,
   type ExecutedTrade,
-  type OrderRequest,
+  type OrderRequestInput,
   type PaperPosition,
+  type StrategyKey,
 } from "./types";
 import { logger } from "@/lib/utils/logger";
 import { getPriceUSD } from "@/lib/prices";
@@ -59,7 +60,9 @@ function applySlippage(price: number, side: "buy" | "sell", bps: number): number
   return price * factor;
 }
 
-export async function placeOrder(input: OrderRequest): Promise<ExecutedTrade> {
+export async function placeOrder(
+  input: OrderRequestInput,
+): Promise<ExecutedTrade> {
   const req = OrderRequestSchema.parse(input);
   const mid = await priceOf(req.market);
   const fillPrice =
@@ -72,6 +75,7 @@ export async function placeOrder(input: OrderRequest): Promise<ExecutedTrade> {
   const trade: ExecutedTrade = {
     id: randomUUID(),
     thesisId: req.thesisId,
+    strategy: req.strategy,
     market: req.market,
     side: req.side,
     kind: req.kind,
@@ -87,6 +91,7 @@ export async function placeOrder(input: OrderRequest): Promise<ExecutedTrade> {
   await db().insert(schema.paperTrades).values({
     id: trade.id,
     thesisId: trade.thesisId,
+    strategy: trade.strategy,
     market: trade.market,
     kind: trade.kind,
     side: trade.side,
@@ -115,7 +120,12 @@ async function upsertPosition(trade: ExecutedTrade): Promise<void> {
   const existing = await db()
     .select()
     .from(schema.paperPositions)
-    .where(eq(schema.paperPositions.market, trade.market))
+    .where(
+      and(
+        eq(schema.paperPositions.strategy, trade.strategy),
+        eq(schema.paperPositions.market, trade.market),
+      ),
+    )
     .limit(1);
 
   const current = existing[0];
@@ -133,6 +143,7 @@ async function upsertPosition(trade: ExecutedTrade): Promise<void> {
   if (!current) {
     if (delta === 0) return;
     await db().insert(schema.paperPositions).values({
+      strategy: trade.strategy,
       market: trade.market,
       kind: trade.kind,
       side: delta > 0 ? "long" : "short",
@@ -173,7 +184,12 @@ async function upsertPosition(trade: ExecutedTrade): Promise<void> {
       unrealizedPnlUsd: String(unrealized),
       updatedAt: new Date(),
     })
-    .where(eq(schema.paperPositions.market, trade.market));
+    .where(
+      and(
+        eq(schema.paperPositions.strategy, trade.strategy),
+        eq(schema.paperPositions.market, trade.market),
+      ),
+    );
 }
 
 export async function markToMarket(): Promise<PaperPosition[]> {
@@ -200,8 +216,14 @@ export async function markToMarket(): Promise<PaperPosition[]> {
         unrealizedPnlUsd: String(unrealized),
         updatedAt: new Date(),
       })
-      .where(eq(schema.paperPositions.market, row.market));
+      .where(
+        and(
+          eq(schema.paperPositions.strategy, row.strategy),
+          eq(schema.paperPositions.market, row.market),
+        ),
+      );
     updates.push({
+      strategy: row.strategy as StrategyKey,
       market: row.market,
       kind: row.kind,
       side: row.side,
@@ -215,9 +237,17 @@ export async function markToMarket(): Promise<PaperPosition[]> {
   return updates;
 }
 
-export async function getPositions(): Promise<PaperPosition[]> {
-  const rows = await db().select().from(schema.paperPositions);
+export async function getPositions(
+  strategy?: StrategyKey,
+): Promise<PaperPosition[]> {
+  const rows = await db()
+    .select()
+    .from(schema.paperPositions)
+    .where(
+      strategy ? eq(schema.paperPositions.strategy, strategy) : undefined,
+    );
   return rows.map((row) => ({
+    strategy: row.strategy as StrategyKey,
     market: row.market,
     kind: row.kind,
     side: row.side,

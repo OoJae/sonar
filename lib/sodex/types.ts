@@ -9,8 +9,14 @@ export const OrderKindSchema = z.enum(["spot", "perp"]);
 export const OrderTypeSchema = z.enum(["market", "limit"]);
 export const PositionSideSchema = z.enum(["long", "short"]);
 
+// Wave 3 strategy dimension: which strategy book a trade/position belongs to.
+export const StrategyKeySchema = z.enum(["directional", "delta-neutral"]);
+export type StrategyKey = z.infer<typeof StrategyKeySchema>;
+export const DEFAULT_STRATEGY: StrategyKey = "directional";
+
 export const OrderRequestSchema = z.object({
   thesisId: z.string().uuid(),
+  strategy: StrategyKeySchema.default(DEFAULT_STRATEGY),
   kind: OrderKindSchema,
   market: z.string(),
   side: OrderSideSchema,
@@ -20,10 +26,14 @@ export const OrderRequestSchema = z.object({
   slippageBps: z.number().int().nonnegative().default(50),
 });
 export type OrderRequest = z.infer<typeof OrderRequestSchema>;
+// Input shape (strategy optional; defaults to "directional" on parse). placeOrder
+// accepts this so existing callers need not specify strategy.
+export type OrderRequestInput = z.input<typeof OrderRequestSchema>;
 
 export const ExecutedTradeSchema = z.object({
   id: z.string().uuid(),
   thesisId: z.string().uuid(),
+  strategy: StrategyKeySchema.default(DEFAULT_STRATEGY),
   market: z.string(),
   side: OrderSideSchema,
   kind: OrderKindSchema,
@@ -38,6 +48,7 @@ export const ExecutedTradeSchema = z.object({
 export type ExecutedTrade = z.infer<typeof ExecutedTradeSchema>;
 
 export const PaperPositionSchema = z.object({
+  strategy: StrategyKeySchema.default(DEFAULT_STRATEGY),
   market: z.string(),
   kind: OrderKindSchema,
   side: PositionSideSchema,

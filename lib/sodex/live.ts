@@ -40,11 +40,13 @@ import {
   isDust,
   recordPlaced,
 } from "./risk";
-import { mapSodexStatus } from "./types";
+import { mapSodexStatus, OrderRequestSchema } from "./types";
 import type {
   ExecutedTrade,
   OrderRequest,
+  OrderRequestInput,
   SodexOrderStatus,
+  StrategyKey,
 } from "./types";
 
 // Polling: 500ms initial, 1.5x backoff, 5s cap, 30s total timeout.
@@ -53,13 +55,17 @@ const POLL_MULTIPLIER = 1.5;
 const POLL_CAP_MS = 5000;
 const POLL_TIMEOUT_MS = 30_000;
 
-function clientOrderId(thesisId: string, market: string): string {
+function clientOrderId(
+  strategy: string,
+  thesisId: string,
+  market: string,
+): string {
   // Deterministic 24-char alphanumeric+dash key. SoDEX testnet rejects the
   // bare keccak hex ("0x..." format) with `code: -1, error: clOrdID is
   // invalid`, so we hash and then format as `sonar-<16 lowercase hex>`. This
   // stays deterministic per (thesisId, market), matches common exchange
   // clOrdID conventions, and stays well under any reasonable length cap.
-  const hash = keccak256(stringToBytes(`${thesisId}:${market}`));
+  const hash = keccak256(stringToBytes(`${strategy}:${thesisId}:${market}`));
   return `sonar-${hash.slice(2, 18)}`;
 }
 
@@ -76,7 +82,10 @@ async function resolveRunIdForCap(thesisId: string): Promise<string> {
   return rows[0]?.runId ?? thesisId;
 }
 
-export async function placeOrder(req: OrderRequest): Promise<ExecutedTrade> {
+export async function placeOrder(
+  rawReq: OrderRequestInput,
+): Promise<ExecutedTrade> {
+  const req = OrderRequestSchema.parse(rawReq);
   // Sanity: only tradeable markets should ever reach this function. The
   // executor facade routes non-tradeable markets to paper. Defence in depth.
   const resolution = resolveMarket(req.market);
@@ -91,7 +100,7 @@ export async function placeOrder(req: OrderRequest): Promise<ExecutedTrade> {
     );
   }
 
-  const clOrdID = clientOrderId(req.thesisId, req.market);
+  const clOrdID = clientOrderId(req.strategy, req.thesisId, req.market);
   const runId = await resolveRunIdForCap(req.thesisId);
 
   // Idempotency: if this leg was already attempted, resume from the existing
@@ -146,6 +155,7 @@ export async function placeOrder(req: OrderRequest): Promise<ExecutedTrade> {
     const id = await insertOrderRow({
       clOrdID,
       thesisId: req.thesisId,
+      strategy: req.strategy,
       runId,
       market: resolution.symbolName,
       kind: "perp",
@@ -164,6 +174,7 @@ export async function placeOrder(req: OrderRequest): Promise<ExecutedTrade> {
   const orderRowId = await insertOrderRow({
     clOrdID,
     thesisId: req.thesisId,
+    strategy: req.strategy,
     runId,
     market: resolution.symbolName,
     kind: "perp",
@@ -345,6 +356,7 @@ function numericField(obj: Record<string, unknown>, keys: string[]): number {
 async function insertOrderRow(input: {
   clOrdID: string;
   thesisId: string;
+  strategy: string;
   runId: string;
   market: string;
   kind: "spot" | "perp";
@@ -360,6 +372,7 @@ async function insertOrderRow(input: {
       id,
       clientOrderId: input.clOrdID,
       thesisId: input.thesisId,
+      strategy: input.strategy,
       runId: input.runId,
       market: input.market,
       kind: input.kind,
@@ -441,6 +454,7 @@ async function finalizeOrder(
     .values({
       id: tradeId,
       thesisId: req.thesisId,
+      strategy: req.strategy,
       market: symbolName,
       kind: "perp",
       side: req.side,
@@ -460,6 +474,7 @@ async function finalizeOrder(
 
   // Best-effort position update via the existing upsert helper.
   await upsertPositionFromLiveFill({
+    strategy: req.strategy,
     market: symbolName,
     side: req.side,
     fillPrice,
@@ -470,6 +485,7 @@ async function finalizeOrder(
   return {
     id: tradeId,
     thesisId: req.thesisId,
+    strategy: req.strategy,
     market: symbolName,
     side: req.side,
     kind: "perp",
@@ -486,6 +502,7 @@ async function finalizeOrder(
 // Lightweight position upsert; mirrors lib/sodex/paper.ts:upsertPosition but
 // reads from the actual fill numbers rather than synthesized ones.
 async function upsertPositionFromLiveFill(input: {
+  strategy: string;
   market: string;
   side: "buy" | "sell";
   fillPrice: number;
@@ -495,7 +512,12 @@ async function upsertPositionFromLiveFill(input: {
   const existing = await db()
     .select()
     .from(schema.paperPositions)
-    .where(eq(schema.paperPositions.market, input.market))
+    .where(
+      and(
+        eq(schema.paperPositions.strategy, input.strategy),
+        eq(schema.paperPositions.market, input.market),
+      ),
+    )
     .limit(1);
 
   const delta =
@@ -505,6 +527,7 @@ async function upsertPositionFromLiveFill(input: {
   const current = existing[0];
   if (!current) {
     await db().insert(schema.paperPositions).values({
+      strategy: input.strategy,
       market: input.market,
       kind: input.kind,
       side: delta > 0 ? "long" : "short",
@@ -537,7 +560,12 @@ async function upsertPositionFromLiveFill(input: {
       unrealizedPnlUsd: "0",
       updatedAt: new Date(),
     })
-    .where(eq(schema.paperPositions.market, input.market));
+    .where(
+      and(
+        eq(schema.paperPositions.strategy, input.strategy),
+        eq(schema.paperPositions.market, input.market),
+      ),
+    );
 }
 
 // Replays an idempotent ExecutedTrade view of an orders row that already
@@ -548,6 +576,7 @@ function tradeFromOrderRow(
   return {
     id: row.id,
     thesisId: row.thesisId,
+    strategy: row.strategy as StrategyKey,
     market: row.market,
     side: row.side,
     kind: row.kind,

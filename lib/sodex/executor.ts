@@ -27,11 +27,13 @@ import { logger } from "@/lib/utils/logger";
 import { resolveMarket } from "./markets";
 import * as paper from "./paper";
 import * as live from "./live";
-import type { ExecutedTrade, OrderRequest } from "./types";
+import type { ExecutedTrade, OrderRequestInput } from "./types";
 
 export { getPositions, markToMarket, recentTrades, tradesForThesis } from "./paper";
 
-export async function placeOrder(req: OrderRequest): Promise<ExecutedTrade> {
+export async function placeOrder(
+  req: OrderRequestInput,
+): Promise<ExecutedTrade> {
   const mode = env().SONAR_EXECUTION_MODE;
 
   if (mode === "live-mainnet") {

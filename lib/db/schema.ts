@@ -59,6 +59,9 @@ export const theses = pgTable("theses", {
   asOf: timestamp("as_of", { withTimezone: true }).notNull(),
   mode: thesisModeEnum("mode").notNull().default("trade"),
   status: thesisStatusEnum("status").notNull().default("valid"),
+  // Wave 3 strategy dimension: which strategy book this thesis belongs to.
+  // "directional" (the Wave 2 LLM rebalance) or "delta-neutral" (rules-based).
+  strategy: text("strategy").notNull().default("directional"),
   reasoning: text("reasoning").notNull(),
   payload: jsonb("payload").notNull(),
   rejectionReason: text("rejection_reason"),
@@ -89,6 +92,7 @@ export const paperTrades = pgTable("paper_trades", {
   thesisId: uuid("thesis_id")
     .notNull()
     .references(() => theses.id),
+  strategy: text("strategy").notNull().default("directional"),
   market: text("market").notNull(),
   kind: orderKindEnum("kind").notNull(),
   side: orderSideEnum("side").notNull(),
@@ -101,16 +105,25 @@ export const paperTrades = pgTable("paper_trades", {
   executedAt: timestamp("executed_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
-export const paperPositions = pgTable("paper_positions", {
-  market: text("market").primaryKey(),
-  kind: orderKindEnum("kind").notNull(),
-  side: positionSideEnum("side").notNull(),
-  quantity: numeric("quantity", { precision: 30, scale: 12 }).notNull(),
-  avgEntryPrice: numeric("avg_entry_price", { precision: 20, scale: 10 }).notNull(),
-  markPrice: numeric("mark_price", { precision: 20, scale: 10 }).notNull(),
-  unrealizedPnlUsd: numeric("unrealized_pnl_usd", { precision: 20, scale: 6 }).notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
-});
+export const paperPositions = pgTable(
+  "paper_positions",
+  {
+    // Composite PK (strategy, market): each strategy keeps an isolated book, so
+    // two strategies can hold a position in the same market independently.
+    strategy: text("strategy").notNull().default("directional"),
+    market: text("market").notNull(),
+    kind: orderKindEnum("kind").notNull(),
+    side: positionSideEnum("side").notNull(),
+    quantity: numeric("quantity", { precision: 30, scale: 12 }).notNull(),
+    avgEntryPrice: numeric("avg_entry_price", { precision: 20, scale: 10 }).notNull(),
+    markPrice: numeric("mark_price", { precision: 20, scale: 10 }).notNull(),
+    unrealizedPnlUsd: numeric("unrealized_pnl_usd", { precision: 20, scale: 6 }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.strategy, t.market] }),
+  }),
+);
 
 // Wave 2 live orders. Mirrors the paperTrades shape for the fields we already
 // track, plus the live-only fields (clientOrderId for idempotency, sodexOrderId
@@ -129,6 +142,7 @@ export const orders = pgTable("orders", {
   runId: uuid("run_id")
     .notNull()
     .references(() => agentRuns.id),
+  strategy: text("strategy").notNull().default("directional"),
   market: text("market").notNull(),
   side: orderSideEnum("side").notNull(),
   kind: orderKindEnum("kind").notNull(),
