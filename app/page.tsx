@@ -5,8 +5,41 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
+import { computeTrackData } from "@/lib/track/compute";
+import { memo } from "@/lib/api/memo";
+import { env } from "@/lib/utils/env";
 
-export default function Landing() {
+export const dynamic = "force-dynamic";
+
+type LiveStats = {
+  bookReturnPct: number;
+  baselineReturnPct: number;
+  winRate: number | null;
+  cycles: number;
+} | null;
+
+async function loadLiveStats(): Promise<LiveStats> {
+  try {
+    const t = await memo("landing:track", 60_000, () => computeTrackData());
+    if (!t.hasEnoughData) return null;
+    return {
+      bookReturnPct: t.bookReturnPct,
+      baselineReturnPct: t.baselineReturnPct,
+      winRate: t.winRate,
+      cycles: t.tradeCount + t.noTradeCount,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function signedPct(n: number): string {
+  return `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
+}
+
+export default async function Landing() {
+  const stats = await loadLiveStats();
+  const telegramUrl = env().TELEGRAM_CHANNEL_URL;
   return (
     <main className="flex-1">
       <section className="relative overflow-hidden border-b border-border">
@@ -15,7 +48,7 @@ export default function Landing() {
           <div className="flex items-center gap-3">
             <Radar className="size-5 text-[color:var(--gold)]" aria-hidden />
             <span className="mono text-xs uppercase tracking-[0.22em] text-muted-foreground">
-              Sonar / Wave 2 / live on SoDEX testnet
+              Sonar / live on SoDEX testnet / API + MCP + Telegram
             </span>
           </div>
           <h1 className="mt-6 max-w-3xl text-5xl font-semibold leading-[1.05] tracking-tight text-foreground lg:text-6xl">
@@ -30,6 +63,38 @@ export default function Landing() {
             You keep the keys. The agent keeps the receipts.
           </p>
 
+          {stats ? (
+            <div className="mt-8 flex flex-wrap gap-3">
+              <StatPill
+                label="Sonar book"
+                value={signedPct(stats.bookReturnPct)}
+                tone={stats.bookReturnPct >= 0 ? "positive" : "negative"}
+              />
+              <StatPill
+                label="Buy and hold"
+                value={signedPct(stats.baselineReturnPct)}
+              />
+              <StatPill
+                label="Excess"
+                value={signedPct(
+                  stats.bookReturnPct - stats.baselineReturnPct,
+                )}
+                tone={
+                  stats.bookReturnPct - stats.baselineReturnPct >= 0
+                    ? "positive"
+                    : "negative"
+                }
+              />
+              {stats.winRate !== null ? (
+                <StatPill
+                  label="Win rate"
+                  value={`${Math.round(stats.winRate * 100)}%`}
+                />
+              ) : null}
+              <StatPill label="Cycles logged" value={String(stats.cycles)} />
+            </div>
+          ) : null}
+
           <div className="mt-10 flex flex-wrap items-center gap-3">
             <Link
               href="/signals"
@@ -39,18 +104,36 @@ export default function Landing() {
               <ArrowRight className="size-4" />
             </Link>
             <Link
-              href="/portfolio"
+              href="/track"
               className={buttonVariants({ variant: "outline", size: "lg" })}
             >
-              View portfolio
+              Verify the track record
             </Link>
-            <Badge
-              variant="secondary"
-              className="mono text-[10px] uppercase tracking-[0.18em]"
+            <Link
+              href="/docs"
+              className={buttonVariants({ variant: "ghost", size: "lg" })}
             >
-              Live SoDEX testnet execution, with a verifiable track record.
-            </Badge>
+              API + MCP
+            </Link>
+            {telegramUrl ? (
+              <a
+                href={telegramUrl}
+                target="_blank"
+                rel="noreferrer"
+                className={buttonVariants({ variant: "ghost", size: "lg" })}
+              >
+                Follow on Telegram
+              </a>
+            ) : null}
           </div>
+          <p className="mt-4 max-w-2xl text-xs text-muted-foreground">
+            Paper plus testnet during the buildathon; every number traces to a
+            cited thesis, a logged run, or an on-chain fill.{" "}
+            <Link href="/about" className="text-accent hover:underline">
+              What Sonar is (and is not)
+            </Link>
+            .
+          </p>
 
           <div className="mt-14 grid gap-6 sm:grid-cols-3">
             <Feature
@@ -108,6 +191,31 @@ export default function Landing() {
         </ol>
       </section>
     </main>
+  );
+}
+
+function StatPill({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone?: "positive" | "negative";
+}) {
+  const toneClass =
+    tone === "positive"
+      ? "text-[color:var(--positive)]"
+      : tone === "negative"
+      ? "text-[color:var(--negative)]"
+      : "text-foreground";
+  return (
+    <span className="inline-flex items-baseline gap-2 rounded-md border border-border/60 bg-card/50 px-3 py-1.5 backdrop-blur">
+      <span className="mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+        {label}
+      </span>
+      <span className={`mono text-sm ${toneClass}`}>{value}</span>
+    </span>
   );
 }
 

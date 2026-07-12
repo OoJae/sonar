@@ -351,19 +351,57 @@ recent US ETF close is more than 36 hours stale.
   Restart=always and 60s graceful stop. nginx vhost committed to repo.
   https://sonar.my.id survives `systemctl restart`.
 
-**Wave 3 carry-over.**
+**Wave 3, shipped.**
 
-- Live Mirror Protocol mainnet bridge (the config-gated design is in
-  `lib/chain/bridge.ts`; Wave 3 wires the ABI). Live mainnet execution.
-- Scoped session-key delegation (Wave 2 keeps the executor on a
-  server-side hot wallet; user connect is read-only).
-- Production risk engine (VaR, drawdown caps, correlation limits) beyond
-  the Wave 2 notional caps and macro breaker.
-- Custom SSI index proposals; the delta-neutral USSI multi-strategy.
+- **Production risk engine (`/risk`).** Historical VaR, max/current drawdown
+  with an automatic de-risk cap, index correlation matrix, exposure and
+  concentration; composed with the macro breaker.
+- **Multi-strategy book.** A rules-based delta-neutral carry (long MAG7
+  basket, short a BTC perp sized to the basket's BTC weight) runs beside the
+  directional strategy with its own isolated book and its own `/track` curve.
+- **Session-key delegation (`/delegation`).** A user signs a scoped,
+  expiring, revocable EIP-712 grant (markets + max notional) enforced by the
+  executor before every order. App-level enforcement, honestly labeled.
+- **Custom SSI index proposals (`/proposals`).** Anyone gives the agent a
+  theme; it designs a priced, cited index basket, and every proposal accrues
+  a daily forward test from creation (the arena leaderboard).
+
+**Product surface (post-Wave-3).**
+
+- **Public API v1 + hosted MCP.** Every receipt on the dashboard is
+  consumable as JSON and as MCP tools; see the [/docs](https://sonar.my.id/docs)
+  page. `claude mcp add --transport http sonar https://sonar.my.id/api/mcp`
+- **Telegram notifications.** A channel + subscribe bot deliver the daily
+  cycle summary and new proposals (ships dark until credentials are set).
+
+**Mainnet carry-over.** Live Mirror Protocol bridge + mainnet execution stay
+demonstrable designs (`lib/chain/bridge.ts`), not live capital.
 
 See [docs/wave-changelog.md](docs/wave-changelog.md) for the full
 deliverables ledger.
 
+
+## Use Sonar (API, MCP, Telegram)
+
+The dashboard is one consumer of Sonar's data; everything it renders is public:
+
+```bash
+# REST API v1 (public, read-only, rate limited, CORS open)
+curl -s https://sonar.my.id/api/v1/thesis/latest | jq .data.thesis.reasoning
+curl -s https://sonar.my.id/api/v1/track | jq .data.bookReturnPct
+curl -s https://sonar.my.id/api/v1/status | jq .data
+```
+
+```bash
+# MCP for AI agents (hosted, zero install)
+claude mcp add --transport http sonar https://sonar.my.id/api/mcp
+# or local stdio from this repo
+claude mcp add --transport stdio sonar -- npx tsx mcp-servers/sonar/index.ts
+```
+
+Telegram: the bot posts each cycle's summary (mode, allocations, fills, risk
+state) to the public channel, and users can DM /start for direct pushes. See
+[/docs](https://sonar.my.id/docs) for the full endpoint table.
 
 ## Documentation
 

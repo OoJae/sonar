@@ -38,9 +38,22 @@ export default function DashboardLayout({
       <footer className="border-t border-border">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-8 py-4 text-xs text-muted-foreground">
           <span className="mono uppercase tracking-[0.18em]">
-            sonar / buildathon 2026
+            sonar {process.env.SONAR_GIT_SHA ?? "dev"} / buildathon 2026
           </span>
           <span className="mono flex items-center gap-4 uppercase tracking-[0.18em]">
+            <Link href="/about" className="hover:text-foreground">
+              about
+            </Link>
+            <Link href="/docs" className="hover:text-foreground">
+              api
+            </Link>
+            <a
+              href="/api/v1/status"
+              className="hover:text-foreground"
+              title="service status JSON"
+            >
+              status
+            </a>
             {telegramUrl ? (
               <a
                 href={telegramUrl}
