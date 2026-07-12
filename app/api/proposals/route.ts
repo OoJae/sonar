@@ -10,6 +10,7 @@ import {
 import { logger } from "@/lib/utils/logger";
 import { generateProposal } from "@/lib/proposals/generate";
 import { persistProposal, listProposals } from "@/lib/proposals/store";
+import { notifyProposalCreated } from "@/lib/notify/cycle";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -99,6 +100,14 @@ export async function POST(request: Request) {
       return NextResponse.json(result, { status: 502 });
     }
     await persistProposal(result.proposal);
+    // Fire-and-forget Telegram announcement (never blocks the response).
+    notifyProposalCreated({
+      name: result.proposal.name,
+      symbol: result.proposal.symbol,
+      theme: result.proposal.theme,
+      coverage: result.proposal.pricing.coverage,
+      perUnitNavUsd: result.proposal.pricing.perUnitNavUsd,
+    }).catch(() => undefined);
     return NextResponse.json({ ok: true, proposal: result.proposal });
   } catch (err) {
     logger.error("proposal_run.failed", {

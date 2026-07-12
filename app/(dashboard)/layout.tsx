@@ -3,6 +3,7 @@ import { Radar } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { DashboardNav } from "@/components/dashboard-nav";
 import { executionModeLabel } from "@/lib/utils/mode";
+import { env } from "@/lib/utils/env";
 
 export default function DashboardLayout({
   children,
@@ -10,6 +11,7 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const mode = executionModeLabel();
+  const telegramUrl = env().TELEGRAM_CHANNEL_URL;
   return (
     <div className="flex min-h-screen flex-col">
       <header className="sticky top-0 z-20 border-b border-border bg-background/90 backdrop-blur">
@@ -38,8 +40,18 @@ export default function DashboardLayout({
           <span className="mono uppercase tracking-[0.18em]">
             sonar / buildathon 2026
           </span>
-          <span className="mono uppercase tracking-[0.18em]">
-            data: sosovalue / ssi / sodex
+          <span className="mono flex items-center gap-4 uppercase tracking-[0.18em]">
+            {telegramUrl ? (
+              <a
+                href={telegramUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-accent hover:underline"
+              >
+                telegram
+              </a>
+            ) : null}
+            <span>data: sosovalue / ssi / sodex</span>
           </span>
         </div>
       </footer>

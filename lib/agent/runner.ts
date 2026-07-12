@@ -20,6 +20,7 @@ import { setDeRiskFactor, clearDeRisk, resetCycle } from "@/lib/sodex/risk";
 import { evaluateDrawdownGuard } from "@/lib/risk/governance";
 import { persistThesis } from "./persist";
 import { runDeltaNeutral } from "@/lib/strategy/delta-neutral";
+import { notifyCycleFinished } from "@/lib/notify/cycle";
 
 // Xiaomi MiMo V2.5 Pro via its Anthropic-compatible endpoint. The @ai-sdk/
 // anthropic package handles the Messages API + tool calls; we just override
@@ -263,6 +264,19 @@ export async function runAgentCycle(opts?: {
     }
 
     await finishRun(runId, true, null);
+
+    // Telegram summary, fire-and-forget: a lost notification must never fail
+    // or slow the cycle (no await; broadcast paces itself).
+    notifyCycleFinished({
+      runId,
+      thesis: capture.thesis,
+      deRiskFactor: combinedDeRisk,
+    }).catch((err) =>
+      logger.warn("agent.notify_failed", {
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+
     return {
       ok: true,
       runId,

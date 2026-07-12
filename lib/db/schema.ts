@@ -7,6 +7,7 @@ import {
   numeric,
   integer,
   boolean,
+  bigint,
   pgEnum,
   primaryKey,
   index,
@@ -264,6 +265,16 @@ export const dnSnapshots = pgTable("dn_snapshots", {
     .notNull(),
 });
 
+// Telegram subscribers (users who sent /start to the bot). chat_id is BIGINT:
+// Telegram ids exceed int32. Broadcast marks blocked users inactive (403).
+export const telegramSubscribers = pgTable("telegram_subscribers", {
+  chatId: bigint("chat_id", { mode: "number" }).primaryKey(),
+  active: boolean("active").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
 export type AgentRunRow = typeof agentRuns.$inferSelect;
 export type ThesisRow = typeof theses.$inferSelect;
 export type SignalRow = typeof signals.$inferSelect;
@@ -274,3 +285,4 @@ export type NavSnapshotRow = typeof navSnapshots.$inferSelect;
 export type DelegationRow = typeof delegations.$inferSelect;
 export type ProposalRow = typeof proposals.$inferSelect;
 export type DnSnapshotRow = typeof dnSnapshots.$inferSelect;
+export type TelegramSubscriberRow = typeof telegramSubscribers.$inferSelect;

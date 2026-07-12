@@ -79,6 +79,14 @@ const EnvShape = z.object({
     .string()
     .regex(/^\d+\/\d+$/)
     .default("120/60"),
+  // Telegram notifications (all optional; the notify module no-ops when the
+  // token is unset). Channel id is "@name" or "-100..."; the bot must be a
+  // channel admin with the post-messages right.
+  TELEGRAM_BOT_TOKEN: z.string().min(1).optional(),
+  TELEGRAM_CHANNEL_ID: z.string().min(1).optional(),
+  TELEGRAM_WEBHOOK_SECRET: z.string().min(16).optional(),
+  // Public join link rendered as the site CTA (e.g. https://t.me/sonarfund).
+  TELEGRAM_CHANNEL_URL: z.string().url().optional(),
   // Macro circuit breaker lookahead window (hours). When a high-impact macro
   // event (CPI, FOMC, etc.) falls within this horizon, the agent de-risks.
   SONAR_MACRO_HALT_HORIZON_HOURS: z.coerce.number().positive().default(6),
@@ -175,6 +183,17 @@ const EnvSchema = EnvShape.superRefine((cfg, ctx) => {
       path: ["SODEX_WALLET_PRIVATE_KEY"],
       message:
         "SODEX_WALLET_PRIVATE_KEY is required when SONAR_REQUIRE_DELEGATION=true (the session key is derived from it)",
+    });
+  }
+
+  // A bot token without a webhook secret would leave the webhook route
+  // unauthenticated; require them together.
+  if (cfg.TELEGRAM_BOT_TOKEN && !cfg.TELEGRAM_WEBHOOK_SECRET) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["TELEGRAM_WEBHOOK_SECRET"],
+      message:
+        "TELEGRAM_WEBHOOK_SECRET is required when TELEGRAM_BOT_TOKEN is set (openssl rand -hex 24)",
     });
   }
 
