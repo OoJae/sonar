@@ -1,4 +1,6 @@
 import { computeTrackData } from "@/lib/track/compute";
+import { computeDeltaNeutralTrack } from "@/lib/track/delta-neutral";
+import { NavChart } from "@/components/nav-chart";
 import {
   Card,
   CardContent,
@@ -50,6 +52,7 @@ export default async function TrackPage() {
   }
 
   const excess = data.bookReturnPct - data.baselineReturnPct;
+  const dn = await computeDeltaNeutralTrack();
 
   return (
     <div className="space-y-10">
@@ -174,7 +177,94 @@ export default async function TrackPage() {
           </Table>
         </CardContent>
       </Card>
+
+      <Card className="bg-card/70">
+        <CardHeader className="gap-3">
+          <div className="flex items-center gap-2">
+            <CardTitle className="text-base">Delta-neutral book</CardTitle>
+            <Badge
+              variant="outline"
+              className="mono text-[10px] uppercase tracking-[0.16em] text-accent"
+            >
+              rules-based carry
+            </Badge>
+          </div>
+          <CardDescription>
+            The second strategy&apos;s mark-to-market track: long the MAG7 basket,
+            short a sized BTC perp. Net crypto exposure should stay near zero (the
+            neutrality proof) while the book harvests the index-versus-perp basis.
+          </CardDescription>
+          {dn.current ? (
+            <div className="flex flex-wrap gap-2">
+              <DnStatChip label="Long" value={usd(dn.current.longUsd)} />
+              <DnStatChip label="Short" value={usd(dn.current.shortUsd)} />
+              <DnStatChip label="Net" value={usd(dn.current.netUsd)} tone="accent" />
+              <DnStatChip
+                label="Unrealized"
+                value={signedUsd(dn.current.unrealizedPnlUsd)}
+                tone={dn.current.unrealizedPnlUsd >= 0 ? "positive" : "negative"}
+              />
+              <DnStatChip label="Rebalances" value={String(dn.rebalanceCount)} />
+            </div>
+          ) : null}
+        </CardHeader>
+        <CardContent>
+          {dn.hasData ? (
+            <div>
+              <div className="mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground mb-2">
+                Net crypto exposure over time (USD, near zero is neutral)
+              </div>
+              <NavChart
+                data={dn.points.map((p) => ({ asOf: p.asOf, nav: p.netUsd }))}
+                label="net exposure"
+              />
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              The delta-neutral book establishes on the next priced cycle; its
+              track builds from there.
+            </p>
+          )}
+        </CardContent>
+      </Card>
     </div>
+  );
+}
+
+function usd(n: number): string {
+  const a = Math.abs(n);
+  if (a >= 1000) return `$${(n / 1000).toFixed(1)}k`;
+  return `$${n.toFixed(2)}`;
+}
+
+function signedUsd(n: number): string {
+  return `${n >= 0 ? "+" : ""}${usd(n)}`;
+}
+
+function DnStatChip({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone?: "accent" | "positive" | "negative";
+}) {
+  const cls =
+    tone === "accent"
+      ? "text-accent"
+      : tone === "positive"
+      ? "text-[color:var(--positive)]"
+      : tone === "negative"
+      ? "text-[color:var(--negative)]"
+      : "text-foreground";
+  return (
+    <span className="inline-flex items-baseline gap-1.5 rounded-md border border-border/60 bg-card/40 px-2.5 py-1">
+      <span className="mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground">
+        {label}
+      </span>
+      <span className={`mono text-xs ${cls}`}>{value}</span>
+    </span>
   );
 }
 

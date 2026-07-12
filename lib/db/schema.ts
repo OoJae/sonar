@@ -244,6 +244,26 @@ export const proposals = pgTable("proposals", {
     .notNull(),
 });
 
+// Wave 3 delta-neutral track. One row per cycle capturing the delta-neutral
+// book's mark-to-market state (after markToMarket), so /track can plot the second
+// strategy's net-exposure neutrality curve + P&L. Written only when the DN book
+// has positions, so the series starts when the book is established (no backfill).
+export const dnSnapshots = pgTable("dn_snapshots", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  asOf: timestamp("as_of", { withTimezone: true }).notNull(),
+  longUsd: numeric("long_usd", { precision: 20, scale: 6 }).notNull(),
+  shortUsd: numeric("short_usd", { precision: 20, scale: 6 }).notNull(),
+  netUsd: numeric("net_usd", { precision: 20, scale: 6 }).notNull(),
+  grossUsd: numeric("gross_usd", { precision: 20, scale: 6 }).notNull(),
+  unrealizedPnlUsd: numeric("unrealized_pnl_usd", {
+    precision: 20,
+    scale: 6,
+  }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
 export type AgentRunRow = typeof agentRuns.$inferSelect;
 export type ThesisRow = typeof theses.$inferSelect;
 export type SignalRow = typeof signals.$inferSelect;
@@ -253,3 +273,4 @@ export type OrderRow = typeof orders.$inferSelect;
 export type NavSnapshotRow = typeof navSnapshots.$inferSelect;
 export type DelegationRow = typeof delegations.$inferSelect;
 export type ProposalRow = typeof proposals.$inferSelect;
+export type DnSnapshotRow = typeof dnSnapshots.$inferSelect;

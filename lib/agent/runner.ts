@@ -239,6 +239,13 @@ export async function runAgentCycle(opts?: {
       }),
     );
 
+    // Delta-neutral book snapshot for /track (non-fatal), after marks refresh.
+    await persistDeltaNeutralSnapshot(nowIso).catch((err) =>
+      logger.warn("agent.dn_snapshot_failed", {
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+
     if (trace) {
       trace.update({
         output: {
@@ -374,6 +381,34 @@ async function persistNavSnapshots(): Promise<void> {
       asOf: new Date(n.asOf),
     })),
   );
+}
+
+// Snapshot the delta-neutral book's mark-to-market state each cycle (after
+// markToMarket) so /track can plot the second strategy's neutrality + P&L. Only
+// writes when the DN book has positions, so the series starts when it is
+// established (no run of zeros before the first priced cycle).
+async function persistDeltaNeutralSnapshot(nowIso: string): Promise<void> {
+  const positions = await getPositions("delta-neutral");
+  if (positions.length === 0) return;
+  let longUsd = 0;
+  let shortUsd = 0;
+  let unrealized = 0;
+  for (const p of positions) {
+    const mv = p.markPrice * p.quantity;
+    if (p.side === "long") longUsd += mv;
+    else shortUsd += mv;
+    unrealized += p.unrealizedPnlUSD;
+  }
+  await db()
+    .insert(schema.dnSnapshots)
+    .values({
+      asOf: new Date(nowIso),
+      longUsd: String(longUsd),
+      shortUsd: String(shortUsd),
+      netUsd: String(longUsd - shortUsd),
+      grossUsd: String(longUsd + shortUsd),
+      unrealizedPnlUsd: String(unrealized),
+    });
 }
 
 // Wave 1 paper book sizing. The thesis declares targetWeight; the runner is
