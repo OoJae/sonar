@@ -22,6 +22,7 @@ import { persistThesis } from "./persist";
 import { runDeltaNeutral } from "@/lib/strategy/delta-neutral";
 import { notifyCycleFinished } from "@/lib/notify/cycle";
 import { repriceArena } from "@/lib/proposals/arena";
+import { publishThesis } from "@/lib/publish/x";
 
 // Xiaomi MiMo V2.5 Pro via its Anthropic-compatible endpoint. The @ai-sdk/
 // anthropic package handles the Messages API + tool calls; we just override
@@ -283,6 +284,14 @@ export async function runAgentCycle(opts?: {
       deRiskFactor: combinedDeRisk,
     }).catch((err) =>
       logger.warn("agent.notify_failed", {
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+
+    // X post, double-gated inside publishThesis (keys present AND X_AUTOPOST
+    // set after the smoke passed). Fire-and-forget.
+    publishThesis(capture.thesis).catch((err) =>
+      logger.warn("agent.x_publish_failed", {
         error: err instanceof Error ? err.message : String(err),
       }),
     );

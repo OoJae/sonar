@@ -87,6 +87,19 @@ const EnvShape = z.object({
   TELEGRAM_WEBHOOK_SECRET: z.string().min(16).optional(),
   // Public join link rendered as the site CTA (e.g. https://t.me/sonarfund).
   TELEGRAM_CHANNEL_URL: z.string().url().optional(),
+  // X (Twitter) publisher. OAuth 1.0a user context for the Sonar account
+  // (pay-per-use app; the free tier was discontinued Feb 2026). All optional;
+  // the publisher no-ops without them. X_AUTOPOST is the explicit go-live
+  // switch: keys alone enable the smoke script, autoposting stays off until
+  // the smoke has passed on the real app.
+  X_API_KEY: z.string().min(1).optional(),
+  X_API_SECRET: z.string().min(1).optional(),
+  X_ACCESS_TOKEN: z.string().min(1).optional(),
+  X_ACCESS_SECRET: z.string().min(1).optional(),
+  X_AUTOPOST: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((v) => v === "true"),
   // Macro circuit breaker lookahead window (hours). When a high-impact macro
   // event (CPI, FOMC, etc.) falls within this horizon, the agent de-risks.
   SONAR_MACRO_HALT_HORIZON_HOURS: z.coerce.number().positive().default(6),
