@@ -60,6 +60,12 @@ const EnvShape = z.object({
   // Macro circuit breaker lookahead window (hours). When a high-impact macro
   // event (CPI, FOMC, etc.) falls within this horizon, the agent de-risks.
   SONAR_MACRO_HALT_HORIZON_HOURS: z.coerce.number().positive().default(6),
+  // Wave 3 production risk engine. When the reconstructed book drawdown exceeds
+  // SONAR_MAX_DRAWDOWN_PCT, the cycle de-risks (same server-side path as the
+  // macro breaker). SONAR_VAR_CONFIDENCE is the confidence level for the
+  // historical VaR shown on /risk and used by the risk metrics.
+  SONAR_MAX_DRAWDOWN_PCT: z.coerce.number().positive().default(25),
+  SONAR_VAR_CONFIDENCE: z.coerce.number().gt(0).lt(1).default(0.95),
   // Interactive public run-a-cycle demo budget, "<count>/<windowSeconds>".
   // Default: 1 run per 300s globally. Parsed by the demo-run endpoint.
   SONAR_PUBLIC_RUN_RATELIMIT: z

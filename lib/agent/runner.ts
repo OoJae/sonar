@@ -17,6 +17,7 @@ import { computeAllNavs } from "@/lib/ssi/nav";
 import { getEtfSummaryHistory } from "@/lib/sosovalue/client";
 import { evaluateMacroWindow, type BreakerState } from "@/lib/agent/circuit-breaker";
 import { setDeRiskFactor, clearDeRisk, resetCycle } from "@/lib/sodex/risk";
+import { evaluateDrawdownGuard } from "@/lib/risk/governance";
 
 // Xiaomi MiMo V2.5 Pro via its Anthropic-compatible endpoint. The @ai-sdk/
 // anthropic package handles the Messages API + tool calls; we just override
@@ -68,6 +69,9 @@ export async function runAgentCycle(opts?: {
     deRiskFactor: 1,
     reason: null,
   };
+  // Combined server-side de-risk factor (macro breaker + drawdown guard). 1 = no
+  // de-risk. Drives both the risk-gate cap scaling and the executeAllocations tilt.
+  let combinedDeRisk = 1;
 
   try {
     // Inside the try so a failed insert still resets cycleInFlight via finally.
@@ -102,16 +106,32 @@ export async function runAgentCycle(opts?: {
     // server-side (the risk gate scales caps, executeAllocations tilts weights),
     // so the de-risk holds even if the model ignores the prompt.
     breaker = await evaluateMacroWindow({ nowIso });
+    // Production risk engine: the drawdown guard composes with the macro
+    // breaker. The most conservative de-risk factor wins, and both reasons are
+    // persisted so /log and /risk show why the cycle de-risked.
+    const riskGuard = await evaluateDrawdownGuard();
+    const factors: number[] = [];
+    const reasons: string[] = [];
     if (breaker.active) {
-      setDeRiskFactor(breaker.deRiskFactor);
+      factors.push(breaker.deRiskFactor);
+      if (breaker.reason) reasons.push(breaker.reason);
+    }
+    if (riskGuard.active) {
+      factors.push(riskGuard.deRiskFactor);
+      if (riskGuard.reason) reasons.push(riskGuard.reason);
+    }
+    combinedDeRisk = factors.length ? Math.min(...factors) : 1;
+    if (combinedDeRisk < 1) {
+      setDeRiskFactor(combinedDeRisk);
       await db()
         .update(schema.agentRuns)
-        .set({ haltReason: breaker.reason })
+        .set({ haltReason: reasons.join(" | ") })
         .where(eq(schema.agentRuns.id, runId));
-      logger.info("agent.circuit_breaker_active", {
+      logger.info("agent.derisk_active", {
         runId,
-        event: breaker.event?.name,
-        deRiskFactor: breaker.deRiskFactor,
+        deRiskFactor: combinedDeRisk,
+        macroEvent: breaker.event?.name ?? null,
+        drawdown: riskGuard.active,
       });
     }
 
@@ -194,7 +214,7 @@ export async function runAgentCycle(opts?: {
     );
 
     if (capture.thesis.mode === "trade") {
-      await executeAllocations(capture.thesis, breaker);
+      await executeAllocations(capture.thesis, combinedDeRisk);
     }
 
     // Refresh every position mark to a live price each cycle (consistent with
@@ -384,7 +404,7 @@ const DUST_THRESHOLD_USD = 10;
 
 async function executeAllocations(
   thesis: Thesis,
-  breaker: BreakerState,
+  deRiskFactor: number,
 ): Promise<void> {
   const positions = await getPositions();
   const equity = positions.reduce(
@@ -396,10 +416,10 @@ async function executeAllocations(
   // first cycle would size every trade at zero.
   const bookSize = Math.max(equity, NOTIONAL_BOOK_SIZE_USD);
 
-  // Circuit breaker de-risk tilt: scale every risky index target weight down
-  // by the de-risk factor so more of the book sits in USSI during a macro
-  // window. The hedges are scaled separately by the risk gate's cap factor.
-  const weightScale = breaker.active ? breaker.deRiskFactor : 1;
+  // De-risk tilt: scale every risky index target weight down by the combined
+  // de-risk factor (macro breaker + drawdown guard) so more of the book sits in
+  // USSI while a control is active. Hedges are scaled by the risk gate's caps.
+  const weightScale = deRiskFactor;
 
   for (const alloc of thesis.proposedAllocations) {
     const market = `${alloc.index}.ssi`;
