@@ -419,21 +419,34 @@ export async function listPerpSymbols(): Promise<SymbolInfo[]> {
 
 // In-process cache of the (name -> id) map. Symbols are static-ish; the cache
 // stays warm for the process lifetime.
-let symbolNameToId: Map<string, number> | null = null;
-export async function resolvePerpSymbolId(name: string): Promise<number> {
-  if (!symbolNameToId) {
+let symbolNameToInfo: Map<string, SymbolInfo> | null = null;
+async function loadSymbolInfo(): Promise<Map<string, SymbolInfo>> {
+  if (!symbolNameToInfo) {
     const list = await listPerpSymbols();
-    symbolNameToId = new Map(list.map((s) => [s.name, s.id]));
+    symbolNameToInfo = new Map(list.map((s) => [s.name, s]));
   }
-  const id = symbolNameToId.get(name);
-  if (id === undefined) {
+  return symbolNameToInfo;
+}
+
+export async function resolvePerpSymbolId(name: string): Promise<number> {
+  const map = await loadSymbolInfo();
+  const info = map.get(name);
+  if (info === undefined) {
     throw new Error(
       `SoDEX perp symbol "${name}" not found in testnet listing. Available: ${
-        Array.from(symbolNameToId.keys()).slice(0, 10).join(", ")
+        Array.from(map.keys()).slice(0, 10).join(", ")
       }...`,
     );
   }
-  return id;
+  return info.id;
+}
+
+// Venue trading rules for a perp symbol (quantity precision, step, min qty),
+// used to size market sells to a step-aligned quantity.
+export async function getPerpSymbolInfo(
+  name: string,
+): Promise<SymbolInfo | null> {
+  return (await loadSymbolInfo()).get(name) ?? null;
 }
 
 // ---------------------------------------------------------------------------

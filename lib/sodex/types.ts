@@ -126,6 +126,12 @@ export const SymbolInfoSchema = z
   .object({
     id: z.number(),
     name: z.string(),
+    // Venue trading rules (present in the live symbols listing). Used to size
+    // market sells, which must send a step-aligned quantity, not funds.
+    quantityPrecision: z.number().optional(),
+    stepSize: z.string().optional(),
+    minQuantity: z.string().optional(),
+    minNotional: z.string().optional(),
   })
   .passthrough();
 export type SymbolInfo = z.infer<typeof SymbolInfoSchema>;

@@ -191,8 +191,9 @@ export default async function TrackPage() {
           </div>
           <CardDescription>
             The second strategy&apos;s mark-to-market track: long the MAG7 basket,
-            short a sized BTC perp. Net crypto exposure should stay near zero (the
-            neutrality proof) while the book harvests the index-versus-perp basis.
+            short a BTC perp sized to the basket&apos;s BTC weight. The short
+            offsets the dominant BTC beta, so net exposure falls toward the smaller
+            non-BTC residual while the book harvests the index-versus-perp basis.
           </CardDescription>
           {dn.current ? (
             <div className="flex flex-wrap gap-2">
@@ -212,7 +213,7 @@ export default async function TrackPage() {
           {dn.hasData ? (
             <div>
               <div className="mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground mb-2">
-                Net crypto exposure over time (USD, near zero is neutral)
+                Net exposure over time (long minus the BTC short, USD)
               </div>
               <NavChart
                 data={dn.points.map((p) => ({ asOf: p.asOf, nav: p.netUsd }))}

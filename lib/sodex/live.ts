@@ -28,8 +28,10 @@ import { keccak256, stringToBytes } from "viem";
 import { db, schema } from "@/lib/db/client";
 import { logger } from "@/lib/utils/logger";
 import { resolveMarket } from "./markets";
+import { getPriceUSD } from "@/lib/prices";
 import {
   findOrderByClOrdID,
+  getPerpSymbolInfo,
   listPerpOrders,
   submitPerpOrder,
 } from "./client";
@@ -183,6 +185,44 @@ export async function placeOrder(
     status: "pending",
   });
 
+  // Market buys take funds (USD notional); market sells require quantity (asset
+  // units) or the venue rejects them as "funds is invalid". For a sell we size
+  // quantity from a live price of the base symbol (BTC-USD -> BTC), rounded to a
+  // granularity the venue accepts (it filled a BTC buy at 5 decimals). Funds is
+  // the natural shape for buys since the hedge notional is USD-denominated.
+  let sizing: { funds: string } | { quantity: string };
+  if (req.side === "sell") {
+    const base = resolution.symbolName.replace(/-usd$/i, "");
+    const price = await getPriceUSD(base);
+    if (price === null || price <= 0) {
+      const msg = `Cannot size market sell for ${resolution.symbolName}: no live price for ${base}.`;
+      await db()
+        .update(schema.orders)
+        .set({ status: "failed", rejectionReason: msg })
+        .where(eq(schema.orders.id, orderRowId));
+      throw new Error(msg);
+    }
+    // The venue rejects an over-precise or unaligned quantity as "quantity is
+    // invalid". Floor capped/price to the symbol's step size (so the notional
+    // never rounds up past the cap) and format at the symbol's quantity
+    // precision. Defaults match BTC-USD when the listing is unavailable.
+    const info = await getPerpSymbolInfo(resolution.symbolName);
+    const step = info?.stepSize ? Number(info.stepSize) : 1e-5;
+    const precision = info?.quantityPrecision ?? 5;
+    const qty = Math.floor(capped / price / step) * step;
+    if (qty <= 0) {
+      const msg = `Market sell for ${resolution.symbolName} sizes to zero at $${capped} / $${price}.`;
+      await db()
+        .update(schema.orders)
+        .set({ status: "failed", rejectionReason: msg })
+        .where(eq(schema.orders.id, orderRowId));
+      throw new Error(msg);
+    }
+    sizing = { quantity: qty.toFixed(precision) };
+  } else {
+    sizing = { funds: String(capped) };
+  }
+
   // Submit.
   let submitResult: Awaited<ReturnType<typeof submitPerpOrder>>;
   try {
@@ -191,10 +231,7 @@ export async function placeOrder(
       symbolName: resolution.symbolName,
       type: req.type,
       clOrdID,
-      // Market buys use funds (USD notional); market sells use quantity.
-      // For Wave 2 hedges we use market buys/sells. Funds is the natural shape
-      // since the agent's hedge notional is USD-denominated.
-      funds: String(capped),
+      ...sizing,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
