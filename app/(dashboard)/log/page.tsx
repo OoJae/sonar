@@ -77,7 +77,7 @@ export default async function LogPage() {
         >
           transparent decision log
         </Badge>
-        <h1 className="text-3xl font-semibold tracking-tight">Runs</h1>
+        <h1 className="display text-4xl tracking-tight">Runs</h1>
         <p className="max-w-2xl text-sm text-muted-foreground">
           Every agent cycle, accepted or rejected, is recorded here with its
           model, data source, and outcome. Drill into a run to read the thesis

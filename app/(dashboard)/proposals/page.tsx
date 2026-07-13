@@ -58,7 +58,7 @@ export default async function ProposalsPage() {
             design artifact
           </Badge>
         </div>
-        <h1 className="text-3xl font-semibold tracking-tight">Proposals</h1>
+        <h1 className="display text-4xl tracking-tight">Proposals</h1>
         <p className="max-w-2xl text-sm text-muted-foreground">
           The agent designs new themed indices on demand. Give it a theme and it
           proposes a basket of constituents with target weights, prices the basket

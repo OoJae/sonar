@@ -157,7 +157,7 @@ function Header({ thesis }: { thesis: Thesis }) {
         </div>
         <DemoRunButton />
       </div>
-      <h1 className="max-w-3xl text-3xl font-semibold tracking-tight">
+      <h1 className="display max-w-3xl text-4xl tracking-tight">
         {headline(thesis)}
       </h1>
       <div className="flex flex-wrap gap-4 text-xs text-muted-foreground mono uppercase tracking-[0.16em]">

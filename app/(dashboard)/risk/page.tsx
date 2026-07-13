@@ -36,7 +36,7 @@ export default async function RiskPage() {
         >
           risk control
         </Badge>
-        <h1 className="text-3xl font-semibold tracking-tight">Risk</h1>
+        <h1 className="display text-4xl tracking-tight">Risk</h1>
         <p className="max-w-2xl text-sm text-muted-foreground">
           Portfolio-level risk measured off the reconstructed book: historical
           Value-at-Risk, drawdown against an enforced cap, index correlation, and

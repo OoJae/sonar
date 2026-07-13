@@ -31,7 +31,7 @@ export default function DelegationPage() {
             EIP-712 session grant
           </Badge>
         </div>
-        <h1 className="text-3xl font-semibold tracking-tight">Delegation</h1>
+        <h1 className="display text-4xl tracking-tight">Delegation</h1>
         <p className="max-w-2xl text-sm text-muted-foreground">
           Sonar is non-custodial by design: the agent acts under a scoped session
           approval, not custody of your funds. You connect your wallet and sign an

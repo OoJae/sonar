@@ -80,7 +80,7 @@ export default function DocsPage() {
             public / read-only
           </Badge>
         </div>
-        <h1 className="text-3xl font-semibold tracking-tight">API and MCP</h1>
+        <h1 className="display text-4xl tracking-tight">API and MCP</h1>
         <p className="max-w-2xl text-sm text-muted-foreground">
           Everything Sonar publishes on this dashboard is consumable as JSON and
           as MCP tools: the cited theses, the verifiable track record, the risk

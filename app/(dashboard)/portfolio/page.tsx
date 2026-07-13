@@ -130,7 +130,7 @@ export default async function PortfolioPage() {
             {executionModeLabel()}
           </Badge>
         </div>
-        <h1 className="text-3xl font-semibold tracking-tight">Book</h1>
+        <h1 className="display text-4xl tracking-tight">Book</h1>
         <p className="text-sm text-muted-foreground max-w-2xl">
           Every trade is stamped with the thesis that authorized it. Perp hedges
           fire as EIP-712 signed orders on SoDEX testnet; SSI rebalance legs are

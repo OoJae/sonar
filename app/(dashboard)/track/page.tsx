@@ -65,7 +65,7 @@ export default async function TrackPage() {
             paper + testnet
           </Badge>
         </div>
-        <h1 className="text-3xl font-semibold tracking-tight">Performance</h1>
+        <h1 className="display text-4xl tracking-tight">Performance</h1>
         <p className="max-w-2xl text-sm text-muted-foreground">
           Cumulative return of Sonar&apos;s rebalanced book versus a buy-and-hold
           baseline of the same index universe, both indexed to 100 at inception.

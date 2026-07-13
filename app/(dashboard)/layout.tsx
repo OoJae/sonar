@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Radar } from "lucide-react";
+import Image from "next/image";
 import { Badge } from "@/components/ui/badge";
 import { DashboardNav } from "@/components/dashboard-nav";
 import { executionModeLabel } from "@/lib/utils/mode";
@@ -17,7 +17,7 @@ export default function DashboardLayout({
       <header className="sticky top-0 z-20 border-b border-border bg-background/90 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-6 px-8 py-4">
           <Link href="/" className="flex items-center gap-2">
-            <Radar className="size-5 text-[color:var(--gold)]" aria-hidden />
+            <Image src="/brand/sonar-mark.svg" alt="" width={22} height={22} aria-hidden />
             <span className="mono text-xs uppercase tracking-[0.22em]">
               Sonar
             </span>

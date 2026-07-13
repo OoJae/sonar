@@ -55,7 +55,7 @@ export default function AboutPage() {
             honest scope
           </Badge>
         </div>
-        <h1 className="text-3xl font-semibold tracking-tight">
+        <h1 className="display text-4xl tracking-tight">
           What Sonar is (and is not)
         </h1>
         <p className="max-w-2xl text-sm text-muted-foreground">
