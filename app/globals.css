@@ -122,3 +122,77 @@
     box-shadow: inset 2px 0 0 var(--accent);
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Sonar brand layer (see docs/brand.md).
+   The palette is the existing navy + gold system, named for its role in the
+   sonar metaphor. The display face is Instrument Serif, used with restraint.
+--------------------------------------------------------------------------- */
+:root {
+  --abyss: var(--background);
+  --ink: var(--foreground);
+  --ping: var(--gold);
+  --echo: var(--electric);
+  --depth: var(--card);
+}
+
+@layer base {
+  .display {
+    font-family: var(--font-display), Georgia, "Times New Roman", serif;
+    letter-spacing: -0.015em;
+    font-weight: 400;
+  }
+  /* Phosphor treatment: only on --ping elements, sparingly. */
+  .glow-ping {
+    text-shadow: 0 0 24px color-mix(in oklab, var(--ping) 45%, transparent);
+  }
+  /* Landing-only film: 4% grain so the abyss reads as material, not flat. */
+  .grain::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    pointer-events: none;
+    opacity: 0.04;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  /* Masked line reveals: wrap lines in .rv-mask > .rv; add .in when visible. */
+  .rv-mask {
+    overflow: hidden;
+    display: block;
+  }
+  .rv {
+    display: block;
+    transform: translateY(110%);
+    transition: transform 0.9s cubic-bezier(0.16, 1, 0.3, 1);
+    will-change: transform;
+  }
+  .rv.in {
+    transform: translateY(0);
+  }
+  .rv-fade {
+    opacity: 0;
+    transform: translateY(14px);
+    transition:
+      opacity 0.8s cubic-bezier(0.16, 1, 0.3, 1),
+      transform 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+    will-change: transform, opacity;
+  }
+  .rv-fade.in {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .rv,
+    .rv-fade {
+      transform: none;
+      opacity: 0;
+      transition: opacity 0.3s linear;
+    }
+    .rv.in,
+    .rv-fade.in {
+      opacity: 1;
+      transform: none;
+    }
+  }
+}

@@ -1,0 +1,12 @@
+<svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Sonar mark">
+  <!-- Sonar mark: a PPI scope mid-sweep. Outer range ring, two inner arcs with a
+       gap where the beam passes, the sweep needle, its phosphor wedge, and one
+       echo blip on the trail side. Gold #E9BA4D on transparent. -->
+  <circle cx="32" cy="32" r="28" stroke="#E9BA4D" stroke-width="2.5" opacity="0.92"/>
+  <path d="M 50.93 33.66 A 19 19 0 1 1 40.03 14.78" stroke="#E9BA4D" stroke-width="2" opacity="0.55" stroke-linecap="round"/>
+  <path d="M 27 40.66 A 10 10 0 1 1 41.4 35.42" stroke="#E9BA4D" stroke-width="2" opacity="0.35" stroke-linecap="round"/>
+  <path d="M 32 32 L 51.8 12.2 A 28 28 0 0 1 59.57 27.14 Z" fill="#E9BA4D" opacity="0.14"/>
+  <line x1="32" y1="32" x2="51.8" y2="12.2" stroke="#E9BA4D" stroke-width="2.5" stroke-linecap="round"/>
+  <circle cx="51.01" cy="24.32" r="3.2" fill="#E9BA4D"/>
+  <circle cx="32" cy="32" r="2.2" fill="#E9BA4D"/>
+</svg>
