@@ -14,7 +14,9 @@
 - The three-balance cross-chain panel on /portfolio (real): Base USDC, on-chain ValueChain vUSDC, and the SoDEX venue ledger (spot + perps). See [components/balance-panel.tsx](../components/balance-panel.tsx) and [lib/chain/balances.ts](../lib/chain/balances.ts).
 - A funding surface explaining the SoDEX-withdrawal path, with a link to the SoDEX testnet. The bearer-guarded [app/api/chain/fund-valuechain/route.ts](../app/api/chain/fund-valuechain/route.ts) attempts the programmatic withdrawal.
 - [lib/sodex/client.ts](../lib/sodex/client.ts)'s `withdrawVusdcToOnchain` (the SoDEX `transferAsset` action with `type=EVM_WITHDRAW`). **Caveat (2026-05-29):** the programmatic on-chain withdrawal destination constant is not publicly documented. Probed against testnet: `toAccountID=0` gives a `required`-tag error; `toAccountID=<own aid>` gives `toAccountID is invalid`. The SoDEX SDK SKILL.md directs on-chain deposits and withdrawals "via the SoDEX web UI," and only the perps↔spot transfer (magic `999`) is documented as a programmatic transfer. So testnet ValueChain funding is a SoDEX-dashboard operation; the client method stays shape-correct and flips to working the moment the destination constant is confirmed (Discord) or for the mainnet flow.
-- [lib/chain/bridge.ts](../lib/chain/bridge.ts): the Mirror Protocol **mainnet bridge design**, config-gated so it can never run on testnet. Wave 3 wires the ABI.
+- [lib/chain/bridge.ts](../lib/chain/bridge.ts): the Mirror Protocol **mainnet bridge design**, config-gated so it can never run on testnet.
+
+**Update 2026-07-17:** this page previously said "Wave 3 wires the ABI." Wave 3 did not, and deliberately will not, because we still have no Mirror ABI, address, signature, or docs link to wire (see §7 and the standing decision in §8). The interface stays declared, dormant, and honest about its blocker rather than implemented against a guess.
 
 **Submission framing (honest, per playbook §7):** Mirror testnet bridge unavailable, confirmed with the SoSoValue team; used the SoDEX testnet withdrawal path for ValueChain funding, with Mirror as the mainnet design. Adaptive honesty reads better than a faked bridge, and the extra SoDEX withdrawal integration strengthens the Solid API Usage pillar.
 
@@ -75,9 +77,9 @@ In all three cases, the path forward is the same: ask in the buildathon Discord 
 - **Mainnet explorer:** https://main-scan.valuechain.xyz (gated to WebFetch; works in a browser)
 - **Mainnet native gas token:** $SOSO
 - **Testnet chain id:** 138565 (confirmed via SoDEX docs in [docs/sodex-live.md §3](./sodex-live.md))
-- **Testnet RPC URL:** UNCONFIRMED. Likely something like `https://testnet-rpc.valuechain.xyz` but needs to be verified before wagmi config in Phase 5.1.
-- **Testnet explorer:** UNCONFIRMED. Likely `https://testnet-scan.valuechain.xyz` mirroring the mainnet pattern.
-- **Testnet USDC contract:** UNCONFIRMED. Required for both the balance read (Phase 5.1) and the bridge widget (Phase 5.2). User has obtained testnet USDC from the SoDEX faucet (per B2 completion), so the address exists somewhere accessible to them; we need it written into `.env.local` as `VALUECHAIN_USDC_ADDRESS`.
+- **Testnet RPC URL:** `https://testnet.valuechain.xyz`. CONFIRMED by probe 2026-05-29 (returns chainId 138565). Wired in [lib/chain/balances.ts](../lib/chain/balances.ts) as the `VALUECHAIN_RPC_URL` default and in `app/providers.tsx`. (This entry read UNCONFIRMED until 2026-07-17; the probe had happened but was never written back here.)
+- **Testnet explorer:** still UNCONFIRMED. Likely `https://testnet-scan.valuechain.xyz` mirroring the mainnet pattern. Nothing depends on it.
+- **Testnet USDC contract:** RESOLVED and set in `.env.local` as `VALUECHAIN_USDC_ADDRESS`; the three-balance panel reads it. On `live-mainnet` the same var carries the ValueChain **mainnet** USDC address instead, and the boot guard requires it (see [lib/utils/env.ts](../lib/utils/env.ts)). Note this was only ever needed for the balance read: the bridge widget it was also blocking does not exist and is not planned (see §2).
 
 ---
 
@@ -153,3 +155,48 @@ The three blocked env vars get added to `lib/utils/env.ts` as `.optional()` so P
 | Date | Update |
 |---|---|
 | 2026-05-26 | Initial discovery. No public Mirror Protocol artefacts found. Discord ask drafted (§5). Phase 5 split into 5.1 (unblocked) + 5.2 (blocked pending bridge confirmation). |
+| 2026-05-27 | **Discord answer: there is no testnet bridge between Base and ValueChain.** That resolved the testnet question and nothing else: no contract address, no ABI, no function signature, and no docs link were provided, for testnet or mainnet. Funding pivoted to the SoDEX withdrawal path. (Recorded in the TL;DR at the time but never appended here; backfilled 2026-07-17.) |
+| 2026-05-29 | ValueChain testnet RPC confirmed by probe: `https://testnet.valuechain.xyz` returns chainId 138565. §3 corrected 2026-07-17; it had still read UNCONFIRMED for seven weeks after the fact. |
+| 2026-07-17 | **Status unchanged since May: no Mirror artifact of any kind exists.** Reviewed during the Wave 3 mainnet work and decided NOT to implement `buildBridgeTx` behind a guessed ABI (see §8). `lib/chain/bridge.ts` corrected instead: it had claimed the dashboard consumed `isBridgeAvailable()` (nothing imports the module) and that function returned true once the two addresses were set, which would have reported the bridge "available" while `buildBridgeTx` still threw. Availability now tracks the real blocker. `scripts/bridge-dormant-smoke.ts` proves the dormancy, including that setting both addresses does not flip it. |
+
+---
+
+## 8. Standing decision: not guessed (2026-07-17)
+
+The Wave 3 plan originally called for un-stubbing `buildBridgeTx` behind the two
+`MIRROR_BRIDGE_*` env vars, encoding the deposit call against an ABI fragment
+marked UNCONFIRMED. That was reversed after reading the code. The reasoning is
+recorded here so it does not get re-litigated from scratch.
+
+**Why not implement it:**
+
+1. **There is nothing to be shape-correct against.** We have no address, no ABI,
+   no function signature, and no docs link for Mirror Protocol, on any chain (§1,
+   §2). This is unlike `lib/sodex/client.ts:withdrawVusdcToOnchain`, which is
+   often cited as the precedent: that method is shape-correct against a real,
+   documented, signed endpoint where exactly one field value is unknown, and the
+   venue replies with an error naming the bad field. Mirror has no endpoint, so
+   there is no error to learn from. The project rule it would break is
+   [CLAUDE.md §11](../CLAUDE.md): "We will not invent endpoint paths or response
+   shapes. If a SoDEX endpoint is uncertain, we hit the docs URL with curl and
+   write down what we see." There is no URL to curl.
+2. **It would buy zero function and add real risk.** Nothing imports
+   `lib/chain/bridge.ts`; there is no bridge widget and no bridge route. So
+   un-stubbing would not make anything work. It would only make dead code look
+   finished, and leave a guessed function selector primed for whoever eventually
+   sets the addresses. A wrong selector against a real bridge either reverts
+   (useless) or hits some other function with real funds (bad).
+3. **The bridge is not on the funding path.** The SoDEX account is funded by
+   depositing the margin asset directly on ValueChain. Neither testnet nor the
+   gated mainnet path needs a bridge, so there is no pressure to fake one.
+
+**What we ship instead:** the declared interface (`BridgeDirection`, `BridgeTx`),
+config-gated so it cannot run, with `bridgeBlockers()` naming exactly what is
+missing, and a smoke that proves it stays dormant. The honest claim is "the
+two-chain split is real and this is the interface for crossing it; the protocol
+is undocumented to us, we asked, and we are not going to pretend otherwise."
+
+**What would unblock it:** the §5 answers. Addresses alone are NOT enough; the
+ABI is the binding constraint. If Mirror turns out to be a rebrand of an existing
+bridge (§2 possibility 1), its ABI is public and this becomes a small, real
+implementation rather than a guess.

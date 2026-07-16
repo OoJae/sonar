@@ -58,8 +58,12 @@ ValueChain. The ValueChain execution wallet is funded by a SoDEX testnet
 withdrawal of vUSDC to its on-chain address (`lib/sodex/client.ts:
 withdrawVusdcToOnchain`, the transferAsset action with type=EVM_WITHDRAW).
 Mirror Protocol is the mainnet bridge design in `lib/chain/bridge.ts`,
-config-gated by `assertMainnet()` so it can never run on testnet; Wave 3 wires
-the ABI. The /portfolio panel shows three real balances (Base USDC, on-chain
+config-gated by `assertMainnet()` so it can never run on testnet. It stays a
+declared interface, not an implementation: we have no Mirror address, ABI, or
+docs link, so there is nothing to wire and encoding a guess at a fund-moving
+contract is not something we will do (see `docs/mirror-bridge.md` section 8).
+The bridge is not on the funding path either way; the SoDEX account is funded by
+depositing the margin asset directly. The /portfolio panel shows three real balances (Base USDC, on-chain
 ValueChain vUSDC, SoDEX venue spot/perps).
 
 ## Macro circuit breaker
@@ -150,11 +154,14 @@ behind a ConnectKit modal. The agent hot wallet side reads via
 useful story for visitors who do not connect a wallet.
 
 ValueChain testnet is configured inline because viem does not bundle it
-(chainId 138565, RPC https://testnet-rpc.valuechain.xyz). The Mirror
-Protocol bridge widget (Phase 5.2 in the build plan) is foundations-only
-in Wave 2 because the public bridge contract addresses are not yet
-documented (see `docs/mirror-bridge.md`). When that lands the widget
-plugs into the same BalancePanel without rework.
+(chainId 138565, RPC https://testnet.valuechain.xyz, confirmed by probe). There
+is no Mirror Protocol bridge widget and none is planned: the protocol is
+undocumented to us (no address, no ABI, no signatures), and a widget for a
+bridge we cannot call would be a prop. `lib/chain/bridge.ts` carries the typed
+interface and names its own blockers; `scripts/bridge-dormant-smoke.ts` proves
+it stays dormant, including that setting the two address env vars does NOT make
+it available, because the ABI is the real constraint. See
+`docs/mirror-bridge.md`.
 
 ## Runtime hosting
 Production runs under systemd as `sonar.service` (`ops/systemd/sonar.service`),
