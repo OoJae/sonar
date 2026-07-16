@@ -109,18 +109,53 @@ export async function healthCheck(): Promise<SodexHealth> {
 }
 
 // ===========================================================================
-// Wave 2: SoDEX testnet signed-request layer.
+// SoDEX signed-request layer (testnet + mainnet).
 //
-// All calls below sign with the master wallet private key per the Discord
-// clarification documented in docs/sodex-live.md §1. The X-API-Key header is
-// deliberately omitted on testnet. Signatures are EIP-712 typed-data with
-// the payloadHash + uint64 nonce structure documented in §3.
+// Testnet signs every call with the master wallet private key per the Discord
+// clarification in docs/sodex-live.md §1, and deliberately omits X-API-Key.
+// Mainnet (§13) instead signs with a SEPARATE registered keypair and stamps
+// X-API-Key (the registered NAME) + X-API-Chain; the master wallet only
+// registers that key once via registerApiKey() and owns the funds. Everything
+// else (the payloadHash + uint64 nonce EIP-712 structure in §3, the recovery
+// byte normalization) is identical across both, so only the transport differs.
+//
+// The mode is read from SONAR_EXECUTION_MODE and env() is cached, so a mode
+// flip requires an app restart. That also clears aidCache / symbolNameToInfo,
+// which is what we want: those ids are per-venue.
 // ===========================================================================
 
 const TESTNET_CHAIN_ID = 138565;
+const MAINNET_CHAIN_ID = 286623;
 const SIG_PREFIX = "0x01";
 
 type Kind = "spot" | "perps";
+
+type SodexChain = {
+  chainId: number;
+  baseUrl: string;
+  keyName: string | undefined;
+  isMainnet: boolean;
+};
+
+// The single place the venue is decided. Testnet returns exactly what the
+// pre-mainnet code hardcoded, so that path is byte-for-byte unchanged.
+function sodexChain(): SodexChain {
+  const e = env();
+  if (e.SONAR_EXECUTION_MODE === "live-mainnet") {
+    return {
+      chainId: MAINNET_CHAIN_ID,
+      baseUrl: e.SODEX_MAINNET_BASE_URL,
+      keyName: e.SODEX_API_KEY,
+      isMainnet: true,
+    };
+  }
+  return {
+    chainId: TESTNET_CHAIN_ID,
+    baseUrl: e.SODEX_TESTNET_BASE_URL,
+    keyName: undefined,
+    isMainnet: false,
+  };
+}
 
 // Cached signer so we do not re-derive the address per request.
 let cachedAccount: ReturnType<typeof privateKeyToAccount> | null = null;
@@ -136,21 +171,46 @@ function getAccount() {
   return cachedAccount;
 }
 
+// The MASTER wallet address: the SoDEX account owner on both venues. Read URLs
+// and the account id are keyed by this, on mainnet too, even though mainnet
+// writes are signed by the registered key (see getSigningAccount).
 export function getSignerAddress(): `0x${string}` {
   return getAccount().address;
 }
 
-function testnetGateway(kind: Kind): string {
-  return `${env().SODEX_TESTNET_BASE_URL}/${kind}`;
+// The account that actually signs a write. Testnet: the master wallet.
+// Mainnet: the separate registered key, whose NAME travels in X-API-Key.
+let cachedSigningAccount: ReturnType<typeof privateKeyToAccount> | null = null;
+function getSigningAccount() {
+  if (!sodexChain().isMainnet) return getAccount();
+  if (cachedSigningAccount) return cachedSigningAccount;
+  const key = env().SODEX_MAINNET_SIGNING_KEY;
+  if (!key) {
+    throw new Error(
+      "SODEX_MAINNET_SIGNING_KEY is not set. Required to sign any live-mainnet action.",
+    );
+  }
+  cachedSigningAccount = privateKeyToAccount(key as `0x${string}`);
+  return cachedSigningAccount;
+}
+
+// The registered key's address, which addAPIKey binds the key name to.
+export function getMainnetSigningAddress(): `0x${string}` {
+  return getSigningAccount().address;
+}
+
+function gateway(kind: Kind): string {
+  return `${sodexChain().baseUrl}/${kind}`;
 }
 
 // EIP-712 domain. The `name` field switches between "spot" and "futures"
 // depending on which REST surface the request targets, per the schema page.
+// chainId binds the signature to the venue, so it must track the mode.
 function eipDomain(kind: Kind) {
   return {
     name: kind === "spot" ? "spot" : "futures",
     version: "1",
-    chainId: TESTNET_CHAIN_ID,
+    chainId: sodexChain().chainId,
     verifyingContract: "0x0000000000000000000000000000000000000000" as const,
   };
 }
@@ -187,6 +247,7 @@ type SignedAction<T extends Record<string, unknown>> = {
 async function signAction<T extends Record<string, unknown>>(
   kind: Kind,
   action: SignedAction<T>,
+  opts?: { signWithMaster?: boolean },
 ): Promise<{
   sign: `0x${string}`;
   nonce: string;
@@ -195,7 +256,10 @@ async function signAction<T extends Record<string, unknown>>(
   const compactJson = JSON.stringify(action);
   const payloadHash = keccak256(toBytes(compactJson));
   const nonce = nextNonce();
-  const sig = await getAccount().signTypedData({
+  // signWithMaster forces the account owner's key: addAPIKey is the one action
+  // the registered key cannot sign, because it is what registers that key.
+  const signer = opts?.signWithMaster ? getAccount() : getSigningAccount();
+  const sig = await signer.signTypedData({
     domain: eipDomain(kind),
     types: exchangeActionTypes,
     primaryType: "ExchangeAction",
@@ -219,17 +283,112 @@ async function signAction<T extends Record<string, unknown>>(
   };
 }
 
-// Stamp the signed-write headers onto a fetch request. Two headers, by design:
-// X-API-Sign + X-API-Nonce. X-API-Key is omitted on testnet (Discord rule).
-// X-API-Chain is NOT included; the Go SDK does not send it and the chain ID
-// is already bound into the EIP-712 domain at signing time (see signAction).
+// Stamp the signed-write headers onto a fetch request.
+//
+// Testnet: two headers by design, X-API-Sign + X-API-Nonce. X-API-Key is
+// omitted (Discord rule) and X-API-Chain is not sent (the Go SDK does not send
+// it and the chain id is already bound into the EIP-712 domain at signing).
+//
+// Mainnet (docs/sodex-live.md §13): the server has to look up WHICH registered
+// key signed, so X-API-Key (the registered name) is required, and §13 documents
+// X-API-Chain alongside it. The signature itself comes from the registered
+// key's keypair (see getSigningAccount).
 function signedHeaders(sign: `0x${string}`, nonce: string): HeadersInit {
-  return {
+  const base: Record<string, string> = {
     "Content-Type": "application/json",
     Accept: "application/json",
     "X-API-Sign": sign,
     "X-API-Nonce": nonce,
   };
+  const chain = sodexChain();
+  if (chain.isMainnet) {
+    if (!chain.keyName) {
+      throw new Error(
+        "SODEX_API_KEY (registered mainnet key name) is not set; refusing to send an unattributable signed mainnet request.",
+      );
+    }
+    base["X-API-Key"] = chain.keyName;
+    base["X-API-Chain"] = String(chain.chainId);
+  }
+  return base;
+}
+
+// ---------------------------------------------------------------------------
+// Public API: registerApiKey (mainnet only, one-shot setup)
+//
+// The mainnet auth ceremony from docs/sodex-live.md §13: the MASTER wallet
+// registers a name against a separate keypair's address, and from then on every
+// signed write is signed by that keypair and attributed via X-API-Key. This is
+// the one action the registered key cannot sign for itself, so it forces the
+// master signer.
+//
+// The request shape follows §13 and the Go SDK. Per the round-2/round-6
+// convention we implement it shape-correct rather than guessing: if a field
+// name is wrong the engine's `code:-1` envelope names it, and this endpoint
+// moves no funds, so surfacing the real error is safe. Verify with a read
+// first (getAccountState) before calling this.
+// ---------------------------------------------------------------------------
+export async function registerApiKey(input: {
+  name: string;
+  signerAddress: `0x${string}`;
+}): Promise<{ ok: true; raw: unknown }> {
+  if (!sodexChain().isMainnet) {
+    throw new Error(
+      "registerApiKey is mainnet-only; testnet signs with the master wallet and needs no registered key.",
+    );
+  }
+  const body = {
+    name: input.name,
+    address: input.signerAddress,
+  };
+  // Signed by the master wallet: it is the account owner authorizing a new key.
+  // The perps domain is used because the key is registered for the trading
+  // surface we submit orders on.
+  const { sign, nonce } = await signAction(
+    "perps",
+    { type: "addAPIKey", params: body },
+    { signWithMaster: true },
+  );
+
+  const url = `${gateway("perps")}/accounts/apikeys`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      "X-API-Sign": sign,
+      "X-API-Nonce": nonce,
+      // No X-API-Key here: this call is what creates it.
+      "X-API-Chain": String(sodexChain().chainId),
+    },
+    body: JSON.stringify(body),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const errBody = await logHttpError("registerApiKey", res, sign, nonce);
+    throw new Error(`SoDEX registerApiKey ${res.status}: ${errBody.slice(0, 300)}`);
+  }
+  const json: unknown = await res.json();
+  logger.info("sodex.register_api_key_response", {
+    name: input.name,
+    signerAddress: input.signerAddress,
+    body: JSON.stringify(json).slice(0, 400),
+  });
+  if (typeof json === "object" && json !== null) {
+    const envelope = json as Record<string, unknown>;
+    if (typeof envelope.code === "number" && envelope.code !== 0) {
+      const message =
+        typeof envelope.message === "string"
+          ? envelope.message
+          : typeof envelope.error === "string"
+            ? envelope.error
+            : JSON.stringify(envelope);
+      throw new Error(
+        `SoDEX registerApiKey rejected: code=${envelope.code} ${message.slice(0, 300)}`,
+      );
+    }
+  }
+  return { ok: true, raw: json };
 }
 
 // Defensive logger for non-2xx responses; never logs the signature beyond a
@@ -271,12 +430,28 @@ export async function getAccountState(opts?: {
 }): Promise<AccountState> {
   const kind: Kind = opts?.kind ?? "perps";
   const address = opts?.address ?? getSignerAddress();
-  const url = `${testnetGateway(kind)}/accounts/${address}/state`;
-  const res = await fetch(url, {
+  const url = `${gateway(kind)}/accounts/${address}/state`;
+  let res = await fetch(url, {
     method: "GET",
     headers: { Accept: "application/json" },
     cache: "no-store",
   });
+  // Mainnet may gate reads that testnet leaves public. Rather than assume,
+  // stay unsigned-first (the testnet-proven path) and only escalate to a
+  // signed read if the venue actually rejects the anonymous one. This is also
+  // the runbook's proof that the registered key + header trio are accepted.
+  if (!res.ok && sodexChain().isMainnet && (res.status === 401 || res.status === 403)) {
+    logger.info("sodex.account_state_signed_retry", { kind, status: res.status });
+    const { sign, nonce } = await signAction(kind, {
+      type: "accountState",
+      params: { accountAddress: address },
+    });
+    res = await fetch(url, {
+      method: "GET",
+      headers: signedHeaders(sign, nonce),
+      cache: "no-store",
+    });
+  }
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     logger.warn("sodex.account_state_http_error", {
@@ -360,7 +535,7 @@ export async function getVenueVusdc(): Promise<{
   let perps = 0;
   try {
     const res = await fetch(
-      `${testnetGateway("perps")}/accounts/${address}/balances`,
+      `${gateway("perps")}/accounts/${address}/balances`,
       { method: "GET", headers: { Accept: "application/json" }, cache: "no-store" },
     );
     if (res.ok) {
@@ -395,7 +570,7 @@ const PerpSymbolsEnvelopeSchema = z
   .passthrough();
 
 export async function listPerpSymbols(): Promise<SymbolInfo[]> {
-  const url = `${testnetGateway("perps")}/markets/symbols`;
+  const url = `${gateway("perps")}/markets/symbols`;
   const res = await fetch(url, {
     method: "GET",
     headers: { Accept: "application/json" },
@@ -569,7 +744,7 @@ export async function submitPerpOrder(
   });
   void payload; // referenced for the closure-side completeness; not sent.
 
-  const url = `${testnetGateway("perps")}/trade/orders`;
+  const url = `${gateway("perps")}/trade/orders`;
   const res = await fetch(url, {
     method: "POST",
     headers: signedHeaders(sign, nonce),
@@ -722,7 +897,7 @@ export async function getPerpOrderHistory(
 ): Promise<PerpHistoryOrder[]> {
   const address = getSignerAddress();
   const url = new URL(
-    `${testnetGateway("perps")}/accounts/${address}/orders/history`,
+    `${gateway("perps")}/accounts/${address}/orders/history`,
   );
   if (opts.symbol) url.searchParams.set("symbol", opts.symbol);
   url.searchParams.set("limit", String(opts.limit ?? 50));
@@ -826,7 +1001,7 @@ export async function transferSpotToPerps(input: {
   });
   void payload;
 
-  const url = `${testnetGateway("spot")}/accounts/transfers`;
+  const url = `${gateway("spot")}/accounts/transfers`;
   const res = await fetch(url, {
     method: "POST",
     headers: signedHeaders(sign, nonce),
@@ -911,7 +1086,7 @@ export async function withdrawVusdcToOnchain(input: {
   });
   void payload;
 
-  const url = `${testnetGateway("spot")}/accounts/transfers`;
+  const url = `${gateway("spot")}/accounts/transfers`;
   const res = await fetch(url, {
     method: "POST",
     headers: signedHeaders(sign, nonce),
@@ -966,7 +1141,7 @@ const OrdersEnvelopeSchema = z
 
 export async function listPerpOrders(): Promise<SodexOrderSnapshot[]> {
   const address = getSignerAddress();
-  const url = `${testnetGateway("perps")}/accounts/${address}/orders`;
+  const url = `${gateway("perps")}/accounts/${address}/orders`;
   const res = await fetch(url, {
     method: "GET",
     headers: { Accept: "application/json" },
