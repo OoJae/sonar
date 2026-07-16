@@ -63,10 +63,12 @@ export async function POST(request: Request) {
   // of pending_approval, and it is what makes a double-click safe: the second
   // request matches zero rows and stops. Do not add a "resume a stranded row"
   // path here. It looks harmless and is not: the clientOrderId UNIQUE constraint
-  // protects an INSERT, not this path, and venue-side clOrdID dedupe is still
-  // UNCONFIRMED (docs/sodex-live.md), so a resume would be a second real market
-  // order. Crash recovery belongs in POST /api/orders/reconcile, which never
-  // submits.
+  // protects an INSERT, not this path, and the venue does NOT dedupe clOrdID. We
+  // tested that rather than trusting the docs, which had called it UNCONFIRMED
+  // since May: the same key submitted twice created two distinct orders and both
+  // filled (scripts/sodex-clordid-dedupe-probe.ts; docs/sodex-live.md 5.2). So a
+  // resume would be a second real market order. Crash recovery belongs in
+  // POST /api/orders/reconcile, which never submits.
   const claimed = await db()
     .update(schema.orders)
     .set({

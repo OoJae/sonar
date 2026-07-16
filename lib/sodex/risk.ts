@@ -20,8 +20,22 @@
 //      order fail. Layer 4 bounds the resulting position, not the flow.
 //
 // The invariant that makes layer 4 safe: an order that REDUCES exposure is
-// never blocked or downsized. A cap that could block a de-risking order would
-// trap the book above its own limit, which is worse than no cap at all.
+// never blocked or downsized BY LAYER 4. A cap that could block a de-risking
+// order would trap the book above its own limit, which is worse than no cap at
+// all.
+//
+// Scope this honestly. Layers 2 and 3 run first and take no direction argument,
+// so a close larger than the per-order cap is still downsized, and a close in a
+// cycle that has spent its budget is still rejected. "Reducing orders are never
+// gated" is true of layer 4 only, not of the gate as a whole.
+//
+// Scope it again, wider: this whole module only runs inside lib/sodex/live.ts,
+// which handles LIVE VENUE orders. lib/sodex/paper.ts applies none of it, and
+// every .ssi market routes to paper in every mode (see lib/sodex/markets.ts and
+// lib/sodex/executor.ts). So these caps bound what reaches the exchange with
+// real money; they do not bound the simulated index book, whose legs are sized
+// against a notional $100k fund. Any copy that says these caps bound "every
+// cycle" or "everything that follows" is wrong.
 //
 // Mode gate runs at boot via lib/utils/env.ts:superRefine and is reinforced
 // at the executor entrypoint (lib/sodex/executor.ts) for live-mainnet.

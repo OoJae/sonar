@@ -18,6 +18,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { TrackChart } from "@/components/track-chart";
+import { executionModeLabel } from "@/lib/utils/mode";
 
 export const dynamic = "force-dynamic";
 
@@ -61,8 +62,12 @@ export default async function TrackPage() {
           <Badge variant="outline" className="mono text-[10px] uppercase tracking-[0.2em]">
             verifiable track record
           </Badge>
-          <Badge variant="secondary" className="mono text-[10px] uppercase tracking-[0.2em]">
-            paper + testnet
+          <Badge
+            variant="secondary"
+            className="mono text-[10px] uppercase tracking-[0.2em]"
+            title="SONAR_EXECUTION_MODE"
+          >
+            paper + {executionModeLabel()}
           </Badge>
         </div>
         <h1 className="display text-4xl tracking-tight">Performance</h1>
@@ -105,8 +110,10 @@ export default async function TrackPage() {
           <CardTitle className="text-base">Per-thesis attribution</CardTitle>
           <CardDescription>
             Each thesis links to the run that produced it. Cycle return is the
-            book move over the cycle the thesis governed; notional is the USD
-            placed (live SoDEX orders plus recorded SSI rebalance legs).
+            book move over the cycle the thesis governed; notional is the USD the
+            cycle executed, summed from one ledger (paper_trades) so a live fill
+            is counted once. It is dominated by the simulated SSI legs, which are
+            sized against the book, not by the venue-capped perp hedges.
           </CardDescription>
         </CardHeader>
         <CardContent>

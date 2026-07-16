@@ -20,7 +20,7 @@ import {
 import { NavChart, type NavPoint } from "@/components/nav-chart";
 import { BalancePanel } from "@/components/balance-panel";
 import { getAgentBalances } from "@/lib/chain/balances";
-import { executionModeLabel } from "@/lib/utils/mode";
+import { executionModeLabel, executionModeDescription } from "@/lib/utils/mode";
 
 export const dynamic = "force-dynamic";
 
@@ -132,12 +132,11 @@ export default async function PortfolioPage() {
         </div>
         <h1 className="display text-4xl tracking-tight">Book</h1>
         <p className="text-sm text-muted-foreground max-w-2xl">
-          Every trade is stamped with the thesis that authorized it. Perp hedges
-          fire as EIP-712 signed orders on SoDEX testnet; SSI rebalance legs are
-          recorded against the book. The executor speaks one contract, so the
-          mode badge above is the only thing that changes between paper and live.
-          Two strategies now run side by side, each keeping its own isolated book:
-          a directional SSI rotation and a rules-based delta-neutral carry.
+          Every trade is stamped with the thesis that authorized it.{" "}
+          {executionModeDescription()} Two strategies run side by side, a
+          directional SSI rotation and a rules-based delta-neutral carry. Their
+          books are accounted separately, though both trade the same markets on
+          the same venue account, so they share one margin pool.
         </p>
       </div>
 

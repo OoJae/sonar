@@ -17,7 +17,7 @@ const RAILS: Array<{ title: string; body: string }> = [
   },
   {
     title: "Risk gate",
-    body: "Per-order and per-cycle notional caps, a dust floor, and a mode kill switch sit between every decision and the venue. The gate downsizes or blocks; it never trusts the model's sizing.",
+    body: "Four layers sit between a decision and the venue: a dust floor, a per-order cap, a per-cycle cap, and position caps bounding the book itself. The gate downsizes or blocks; it never trusts the model's sizing. It governs orders that reach the exchange, so the simulated SSI index legs, which move no money, are sized against the book instead.",
   },
   {
     title: "Macro circuit breaker",
@@ -30,6 +30,10 @@ const RAILS: Array<{ title: string; body: string }> = [
   {
     title: "Session-key delegation",
     body: "A user signs a scoped, expiring, revocable EIP-712 grant (markets + max notional) that the executor enforces before every order. App-level enforcement, honestly labeled.",
+  },
+  {
+    title: "Human approval on mainnet",
+    body: "On mainnet the daily cycle cannot submit an order. It records the risk-capped order and stops; only an authenticated approval places it. The operator approves the number that reaches the wire, not the model's request.",
   },
   {
     title: "Transparent failure",
@@ -62,9 +66,9 @@ export default function AboutPage() {
           Sonar is an ETF-flow-aware agentic hedge fund built for the SoSoValue
           Buildathon. An AI agent reads crypto ETF flows and structured news
           once per day, writes a research thesis where every number is cited,
-          and rebalances an on-chain index book with live perp hedges, behind a
-          production risk engine. Everything it does is published: the
-          reasoning, the trades, the failures, and the P&L.
+          and rebalances an index book priced off on-chain composition, with
+          live perp hedges behind a risk engine. Everything it does is
+          published: the reasoning, the trades, the failures, and the P&L.
         </p>
       </div>
 
@@ -91,14 +95,17 @@ export default function AboutPage() {
             <li>
               <span className="mono text-foreground">3. Gate.</span> Macro
               calendar and drawdown state can de-risk the cycle before a single
-              order is sized. The risk gate caps everything that follows.
+              order is sized. The risk gate then caps every order that reaches
+              the venue: dust floor, per-order, per-cycle, and position caps.
             </li>
             <li>
               <span className="mono text-foreground">4. Execute.</span> SSI
-              rebalance legs are recorded against the book; perp hedges fire as
-              EIP-712 signed orders on SoDEX testnet. A second, rules-based
-              delta-neutral strategy runs its own hedged book beside the
-              directional one.
+              rebalance legs are simulated against the book; perp hedges go to
+              SoDEX as EIP-712 signed orders. On testnet they fire; on mainnet
+              the cycle records them for human approval and submits nothing.
+              A second, rules-based delta-neutral strategy runs its own book
+              beside the directional one (on testnet and paper; it needs both
+              legs to execute together, so it stands down on mainnet).
             </li>
             <li>
               <span className="mono text-foreground">5. Publish.</span> Thesis,
@@ -144,13 +151,21 @@ export default function AboutPage() {
             not a live-money track record. No deposits are accepted; nothing
             here is investment advice. Delegation is enforced at the application
             layer (the venue does not verify grants); index proposals are priced
-            design artifacts, not on-chain products. Mainnet execution, on-chain
-            grant enforcement, and SSI index creation are the demonstrated
-            designs this maps onto.
+            design artifacts, not on-chain products. The SSI legs are simulated
+            in every mode: Sonar reads each index composition on-chain and prices
+            it live, but it does not mint or burn, so the index book is an
+            accounting of what those weights would do.
+          </p>
+          <p>
+            The gated mainnet path is implemented and smoke-tested, and it has
+            never touched the live venue: no mainnet key is registered and no
+            mainnet order has been placed. On-chain grant enforcement, SSI index
+            creation, and the Mirror Protocol bridge remain designs with no
+            implementation behind them.
           </p>
           <p>
             The credibility claim is narrower and stronger: every number on this
-            site traces to a cited thesis, a logged run, or an on-chain fill,
+            site traces to a cited thesis, a logged run, or a signed venue fill,
             and the failures are published next to the wins.
           </p>
         </CardContent>

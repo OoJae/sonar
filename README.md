@@ -47,20 +47,20 @@ never custody). The decision log shows rejected theses next to accepted ones.
 | Computes per-share NAV from on-chain composition | [lib/ssi/nav.ts](lib/ssi/nav.ts) prices each token via [lib/prices/](lib/prices/) against SoSoValue's market-snapshot endpoint |
 | Charts NAV vs inception on /portfolio | Pure-SVG line chart in [components/nav-chart.tsx](components/nav-chart.tsx); snapshots persist per index per cycle |
 | Places signed perp orders on SoDEX testnet | EIP-712 typed-data signing via viem in [lib/sodex/client.ts](lib/sodex/client.ts); idempotent client-order-id and risk-gate caps in [lib/sodex/live.ts](lib/sodex/live.ts) and [lib/sodex/risk.ts](lib/sodex/risk.ts) |
-| Surfaces every wire-side order | Per-thesis order preview block on /signals with status badges (pending, submitted, filled, rejected) and the SoDEX system order id |
+| Surfaces every wire-side order | Per-thesis order preview block on /signals with status badges (awaiting approval, pending, submitted, filled, rejected) and the SoDEX system order id |
 | Shows a verifiable track record | [/track](app/(dashboard)/track/page.tsx) charts Sonar's NAV-weighted rebalanced book versus a buy-and-hold baseline, with per-thesis attribution and win rate; every number links to the cited thesis. Computed from existing data in [lib/track/compute.ts](lib/track/compute.ts) |
 | De-risks around macro events | Macro circuit breaker reads SoSoValue [/openapi/v1/macro/events](docs/sosovalue-macro.md); a high-impact window (CPI, FOMC, NFP) caps notional and tilts to USSI ([lib/agent/circuit-breaker.ts](lib/agent/circuit-breaker.ts)), cited in the thesis and persisted to `agent_runs.halt_reason` |
-| Lets a judge run a live cycle | Rate-limited public [Run a cycle now](app/api/agent/demo-run/route.ts) control on /signals; no secret reaches the client |
+| Lets a judge run a live cycle | Rate-limited public [Run a cycle now](app/api/agent/demo-run/route.ts) control on /signals; no secret reaches the client. Disabled on mainnet, where the approval queue stays operator-controlled |
 | Funds the ValueChain wallet | SoDEX testnet withdrawal path (no testnet bridge exists); three-balance cross-chain panel in [components/balance-panel.tsx](components/balance-panel.tsx). Mirror Protocol is the mainnet bridge design ([lib/chain/bridge.ts](lib/chain/bridge.ts)) |
 | Publishes per-cycle traces | Real Langfuse trace per run, linked from /log |
 | Refuses to act on stale data | Runner pre-fetches a `dataFreshness` value before the cycle and injects it into the prompt; rule #2 grades against the injected field |
-| Surfaces every decision | Four-page dashboard: Signals, Portfolio, Track, Log |
+| Surfaces every decision | Dashboard: Signals, Portfolio, Track, Risk, Proposals, Delegation, Log, plus About and API docs |
 
-A live cycle in Wave 2 (runId `b9e5ed8f`) produced three paper SSI trades
-and one signed SOL-PERP fill on SoDEX testnet, with the agent's $50k hedge
-notional downsized to $500 by the risk gate. SOL-USD position 2533914 is
-open at the testnet at $82.65 entry. BTC-USD position from the
-idempotency smoke is open at $73,700.
+Evidence, as history rather than current state: a Wave 2 cycle (runId
+`b9e5ed8f`, 2026-05-28) put a signed SOL-PERP order on SoDEX testnet, filled at
+$82.65, after the risk gate downsized the agent's $50k hedge request to the $500
+per-order cap. Those positions have since been closed and the book is flat; the
+`orders` table keeps every fill, including the failures.
 
 ---
 
@@ -319,9 +319,12 @@ recent US ETF close is more than 36 hours stale.
   listings); perp hedges fire live with deterministic clOrdID for
   idempotency. Five non-obvious protocol details discovered and
   documented in `docs/sodex-live.md`.
-- **Risk gate.** Per-order downsize, per-cycle cap, dust floor, mode
-  gate. 16/16 standalone smoke (`scripts/sodex-risk-smoke.ts`). Surfaces
-  rejection reasons on /signals next to the order status badge.
+- **Risk gate.** Four layers on every order that reaches the venue: dust
+  floor, per-order downsize, per-cycle cap, and position caps (per-market
+  and gross) that bound the resulting book rather than the flow. 26/26
+  standalone smoke (`scripts/sodex-risk-smoke.ts`). Surfaces rejection
+  reasons on /signals next to the order status badge. The simulated SSI
+  index legs move no money and are sized against the book instead.
 - **NAV computation.** Off-chain sum of `amount * priceUSD` per share.
   Per-currency prices via SoSoValue's market-snapshot endpoint.
   `nav_snapshots` persist per cycle. Pure-SVG line chart on /portfolio
@@ -374,8 +377,19 @@ recent US ETF close is more than 36 hours stale.
 - **Telegram notifications.** A channel + subscribe bot deliver the daily
   cycle summary and new proposals (ships dark until credentials are set).
 
-**Mainnet carry-over.** Live Mirror Protocol bridge + mainnet execution stay
-demonstrable designs (`lib/chain/bridge.ts`), not live capital.
+**Mainnet.** The gated `live-mainnet` path is implemented and smoke-tested
+(mode-aware SoDEX auth, and a human-approval gate where the daily cycle records
+risk-capped orders and only an authenticated approval submits one), and it has
+**never touched the live venue**: no mainnet key is registered and no mainnet
+order has been placed. Not live capital. Switching to it takes more than the mode
+flag; the boot guard also requires a registered mainnet key. See
+`scripts/sodex-approval-smoke.ts` (19/19).
+
+**Mirror Protocol bridge.** Still a declared interface with no implementation
+behind it, and deliberately so: we have no contract address, ABI, or docs for it,
+and encoding a guess at a fund-moving contract is worse than refusing. It names
+its own blockers (`lib/chain/bridge.ts`), and `scripts/bridge-dormant-smoke.ts`
+proves it stays dormant. It is not on the funding path.
 
 See [docs/wave-changelog.md](docs/wave-changelog.md) for the full
 deliverables ledger.

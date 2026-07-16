@@ -56,13 +56,13 @@ const STRATA: Array<{
     depth: "03",
     name: "gate",
     heading: "De-risk before it happens.",
-    body: "A macro event inside the lookahead window (CPI, FOMC) or a drawdown past the cap scales the whole cycle down before a single order is sized. Per-order and per-cycle caps bound everything that follows.",
+    body: "A macro event inside the lookahead window (CPI, FOMC) or a drawdown past the cap scales the whole cycle down before a single order is sized. Four layers then bound what reaches the venue: a dust floor, a per-order cap, a per-cycle cap, and position caps that bound the book itself rather than the flow.",
   },
   {
     depth: "04",
     name: "execute",
     heading: "Sign, fill, record.",
-    body: "Index rebalance legs are recorded against the book; perp hedges fire as EIP-712 signed orders on SoDEX testnet. A second, rules-based delta-neutral book runs beside the directional one. Every fill links back to the thesis that authorized it.",
+    body: "Index rebalance legs are simulated against the book; perp hedges go to SoDEX as EIP-712 signed orders. On testnet they fire; on mainnet the cycle records them for a human to approve and submits nothing itself. A second, rules-based delta-neutral book runs beside the directional one. Every fill links back to the thesis that authorized it.",
   },
   {
     depth: "05",
@@ -260,8 +260,8 @@ export default async function Landing() {
               style={{ transitionDelay: "0.2s" }}
             >
               Paper plus testnet during the buildathon; every number traces to a
-              cited thesis, a logged run, or an on-chain fill. The failures are
-              published next to the wins, on purpose.
+              cited thesis, a logged run, or a signed venue fill. The failures
+              are published next to the wins, on purpose.
             </p>
             <div
               className="rv-fade mt-8 flex flex-wrap gap-3"

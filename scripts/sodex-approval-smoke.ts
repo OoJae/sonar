@@ -25,6 +25,9 @@
 //   6. submitApprovedOrder refuses an unclaimed row, a row queued under a
 //      different mode, and a row past its approval TTL.
 //   7. Delta-neutral skips entirely on mainnet rather than half-executing.
+//   8. submitAndFinalize forwards reduceOnly, so an approved CLOSE is actually a
+//      close. Without it the engine margins a close as new exposure and can
+//      reject it at exactly the moment you need out.
 //
 // Usage: pnpm tsx scripts/sodex-approval-smoke.ts
 
@@ -43,6 +46,7 @@ process.env.VALUECHAIN_USDC_ADDRESS =
   process.env.VALUECHAIN_USDC_ADDRESS || `0x${"2".repeat(40)}`;
 
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { and, eq } from "drizzle-orm";
 import { db, schema } from "@/lib/db/client";
 import { env } from "@/lib/utils/env";
@@ -302,6 +306,28 @@ async function main() {
     await db().delete(schema.orders).where(eq(schema.orders.id, id));
   }
   console.log(`\nCleaned up ${smokeIds.length} smoke order rows.`);
+
+  console.log("\n8. reduceOnly reaches the wire on a reducing order");
+  {
+    // Static guarantee rather than a live submit: this smoke never contacts the
+    // venue. Assert the wiring exists, because its absence is silent (the venue
+    // just says "insufficient margin" much later, on the close you needed).
+    const src = readFileSync("lib/sodex/live.ts", "utf8");
+    assert(
+      "submitAndFinalize accepts a `reducing` flag",
+      /async function submitAndFinalize\(input: \{[\s\S]*?reducing: boolean;/.test(src),
+    );
+    assert(
+      "it forwards reduceOnly to submitPerpOrder",
+      /reduceOnly: reducing,/.test(src),
+    );
+    const callers = src.match(/submitAndFinalize\(\{[\s\S]*?\}\);/g) ?? [];
+    assert(
+      `every submitAndFinalize caller passes reducing (${callers.length} found)`,
+      callers.length >= 2 && callers.every((c) => c.includes("reducing:")),
+      callers.map((c) => c.slice(0, 60)).join(" | "),
+    );
+  }
 
   console.log(`\nResults: ${pass} pass, ${fail} fail`);
   process.exit(fail === 0 ? 0 : 1);

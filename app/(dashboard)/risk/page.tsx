@@ -8,6 +8,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { computeRiskMetrics, type RiskMetrics } from "@/lib/risk/metrics";
 import { env } from "@/lib/utils/env";
+import { DUST_FLOOR_USD } from "@/lib/sodex/risk";
 
 export const dynamic = "force-dynamic";
 
@@ -40,8 +41,10 @@ export default async function RiskPage() {
         <p className="max-w-2xl text-sm text-muted-foreground">
           Portfolio-level risk measured off the reconstructed book: historical
           Value-at-Risk, drawdown against an enforced cap, index correlation, and
-          concentration. When drawdown breaches the cap the cycle de-risks, the
-          same server-side control as the macro circuit breaker.
+          concentration. Drawdown is the one that acts: breach the cap and the
+          cycle de-risks, the same server-side control as the macro circuit
+          breaker. VaR, correlation and concentration are measured and published,
+          not enforced; nothing gates on them.
         </p>
       </div>
 
@@ -108,17 +111,15 @@ export default async function RiskPage() {
             <CardHeader>
               <CardTitle className="text-base">Active controls</CardTitle>
               <CardDescription>
-                The limits governing every cycle. Flip{" "}
-                <span className="mono">SONAR_EXECUTION_MODE=paper</span> to stop
-                live placement entirely.
+                The limits on every order that reaches the venue. The simulated
+                SSI index legs are sized against the book rather than these caps,
+                because they move no money; the caps exist to bound what does.
+                Flip <span className="mono">SONAR_EXECUTION_MODE=paper</span> and
+                restart to stop live placement entirely.
               </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-3 sm:grid-cols-2">
               <Limit label="Max drawdown cap" value={`${cap}%`} />
-              <Limit
-                label="VaR confidence"
-                value={`${Math.round(e.SONAR_VAR_CONFIDENCE * 100)}%`}
-              />
               <Limit
                 label="Per-order cap"
                 value={`$${e.SONAR_MAX_NOTIONAL_PER_ORDER.toLocaleString()}`}
@@ -128,10 +129,22 @@ export default async function RiskPage() {
                 value={`$${e.SONAR_MAX_NOTIONAL_PER_CYCLE.toLocaleString()}`}
               />
               <Limit
+                label="Per-market position cap"
+                value={`$${e.SONAR_MAX_POSITION_NOTIONAL_USD.toLocaleString()}`}
+              />
+              <Limit
+                label="Gross exposure cap"
+                value={`$${e.SONAR_MAX_GROSS_EXPOSURE_USD.toLocaleString()}`}
+              />
+              <Limit
                 label="Macro breaker horizon"
                 value={`${e.SONAR_MACRO_HALT_HORIZON_HOURS}h`}
               />
-              <Limit label="Dust floor" value="$10" />
+              <Limit label="Dust floor" value={`$${DUST_FLOOR_USD}`} />
+              <Limit
+                label="Mainnet approval"
+                value={e.SONAR_EXECUTION_MODE === "live-mainnet" ? "required" : "n/a off mainnet"}
+              />
             </CardContent>
           </Card>
         </>

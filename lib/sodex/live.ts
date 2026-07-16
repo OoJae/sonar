@@ -13,7 +13,9 @@
 //      attempt's row is read and we resume from its state.
 //   3. Risk gate (lib/sodex/risk.ts): dust floor, per-order downsize,
 //      per-cycle cap, then the position caps (per-market + gross) that bound
-//      the resulting book. Reducing orders are never gated.
+//      the resulting book. The POSITION caps never gate a reducing order; the
+//      per-order and per-cycle caps run first and know nothing about direction,
+//      so a large close is still downsized to the per-order cap.
 //   4. Sign + POST /perps/trade/orders via lib/sodex/client.ts.
 //   5. Update the orders row to `submitted` with the SoDEX order id.
 //   6. Poll listPerpOrders by clOrdID with capped backoff until terminal.
@@ -433,6 +435,9 @@ export async function submitApprovedOrder(orderRowId: string): Promise<ExecutedT
     orderRowId,
     // The budget was reserved when the order was queued; see the flag's comment.
     countAgainstCycleBudget: false,
+    // Tell the venue this is a close. Re-derived from live venue state moments
+    // ago, not from what the order looked like when it was queued.
+    reducing: positionCheck.reducing,
   });
 }
 
@@ -719,6 +724,7 @@ export async function placeOrder(
     // Testnet places inline, so the cycle budget is consumed here after a
     // successful submit, exactly as it was before this extraction.
     countAgainstCycleBudget: true,
+    reducing: positionCheck.reducing,
   });
 }
 
@@ -735,8 +741,12 @@ async function submitAndFinalize(input: {
   capped: number;
   orderRowId: string;
   countAgainstCycleBudget: boolean;
+  // True when this order reduces the venue position rather than growing it.
+  // Both callers already computed it via enforcePositionCap; it is threaded here
+  // because the venue needs to be TOLD. See the submitPerpOrder call below.
+  reducing: boolean;
 }): Promise<ExecutedTrade> {
-  const { req, symbolName, clOrdID, runId, capped, orderRowId, countAgainstCycleBudget } = input;
+  const { req, symbolName, clOrdID, runId, capped, orderRowId, countAgainstCycleBudget, reducing } = input;
 
   // Market buys take funds (USD notional); market sells require quantity (asset
   // units) or the venue rejects them as "funds is invalid". For a sell we size
@@ -784,6 +794,12 @@ async function submitAndFinalize(input: {
       symbolName: symbolName,
       type: req.type,
       clOrdID,
+      // Load-bearing on a close. Without it the engine margins a reducing order
+      // as NEW exposure and rejects it with "insufficient margin" at exactly the
+      // moment you most need out, which is how the testnet book became
+      // inescapable on 2026-07-16. Only ever set when the position caps say this
+      // order reduces, so it can never silently cancel a genuine open.
+      reduceOnly: reducing,
       ...sizing,
     });
   } catch (err) {

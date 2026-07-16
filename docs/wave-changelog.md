@@ -54,6 +54,9 @@
 - `lib/sodex/risk.ts`: dust floor, per-order cap (downsizes), per-cycle
   cap (blocks). Mode gate refuses live-mainnet defence-in-depth even past
   the env boot guard. 16/16 risk smoke (`scripts/sodex-risk-smoke.ts`).
+  (Superseded in Wave 3: the unconditional live-mainnet refusal was
+  removed when the gated mainnet path landed, a fourth layer of position
+  caps was added, and the smoke grew to 26. See the Wave 3 section.)
 - `lib/sodex/client.ts` also exposes the spot-to-perps transferAsset
   signed action (`transferSpotToPerps`) because testnet faucets fund spot
   only; `scripts/sodex-fund-perps.ts` is the one-shot helper.
@@ -145,7 +148,106 @@ watch the agent reason and execute. Hard global plus per-IP budget from
 `SONAR_PUBLIC_RUN_RATELIMIT`, a single-flight lock, and no secret ever reaches
 the client. The existing risk caps bound what a stranger can trigger.
 
-### Carried forward to Wave 3
+---
+
+## Wave 3 (June to July 2026)
+
+### Shipped
+
+**A live-mainnet path that a human has to approve.** `SONAR_EXECUTION_MODE`
+gains a real third mode. On `live-mainnet` the daily cycle CANNOT submit an
+order: it runs the full risk gate, records the risk-capped order as
+`pending_approval`, and stops. Only the bearer-gated
+`POST /api/orders/approve` places it, and that route's atomic claim is the only
+writer that can move a row out of the queue. `POST /api/orders/reconcile` repairs
+drift and never submits. Every caller inherits this for free (cron,
+`/api/agent/run`, and the public demo trigger all funnel through the executor
+facade), and the public trigger is additionally disabled on mainnet so a stranger
+cannot stuff the operator's approval queue. 19/19 smoke
+(`scripts/sodex-approval-smoke.ts`), which asserts, among other things, that a
+$100,000 agent hedge is recorded as the $500 per-order cap.
+
+**Status: implemented and smoke-tested, never exercised against the live venue.**
+No mainnet key is registered and no mainnet order has been placed. Not live
+capital.
+
+**Mode-aware SoDEX auth.** `sodexChain()` is now the single place the venue is
+decided: mainnet uses chainId 286623, the mainnet gateway, and the documented
+`X-API-Key` + `X-API-Chain` header pair, signing writes with a SEPARATE
+registered keypair while the master wallet stays the account owner and only
+registers that key (`registerApiKey`, `scripts/sodex-mainnet-register.ts`). A
+leaked write key is therefore master-revocable. The testnet path is byte-for-byte
+unchanged and was proven so.
+
+**Two real bugs found by running the thing, not by reading it.**
+
+1. *The risk gate bounded the flow but not the book.* The per-order ($500) and
+   per-cycle ($2,000) caps were doing their jobs, and that was the problem: the
+   agent hedges the same direction most days, so 32 individually-legal sells
+   compounded into a 0.234 BTC short, about $14.8k notional at 20x on a $1.5k
+   account. Margin exhausted; every order failed for two days. Added risk.ts
+   layer 4: per-market and gross position caps
+   (`SONAR_MAX_POSITION_NOTIONAL_USD`, `SONAR_MAX_GROSS_EXPOSURE_USD`) that read
+   the VENUE as authoritative, never gate a reducing order, and downsize to the
+   remaining headroom rather than rejecting. Risk smoke 26/26.
+2. *`reduceOnly` was hardcoded false, so the book could not be unwound.* With it
+   false the engine margins a closing order as NEW exposure, so at the margin
+   limit even a close is rejected and the position is inescapable. Found by
+   trying to flatten and being refused. Threaded through `submitPerpOrder` and
+   through the approve path, so an approved close is a real close.
+
+**The venue does not deduplicate clOrdID.** `docs/sodex-live.md` had recorded, as
+UNCONFIRMED since May, that the server "should return the existing order" on a
+repeated key. It does not: the same key submitted twice created two distinct
+orders and both filled (`scripts/sodex-clordid-dedupe-probe.ts`). Our DB
+idempotency and the approval gate's atomic claim are therefore the only
+protection against a double-place, which is why the approve route has no
+"resume" path.
+
+**The Mirror bridge stayed honest instead of getting faked.** The plan called for
+implementing `buildBridgeTx` behind the address env vars. Reversed: no Mirror
+address, ABI, signature or docs link exists, so it would have meant inventing
+calldata for a fund-moving contract with nothing to probe. It also fixed a real
+defect: `isBridgeAvailable()` returned true once the two addresses were set, so
+configuring them would have reported the bridge available while `buildBridgeTx`
+still threw. The ABI is the binding constraint; availability now says so, and
+`scripts/bridge-dormant-smoke.ts` (8/8) proves setting the addresses does not
+flip it.
+
+**Claims corrected.** An audit of the published copy against the code found the
+site both under-claiming and over-claiming. "Every number traces to a cited
+thesis, a logged run, or an on-chain fill" was false: there is no on-chain write
+path in Sonar at all (`txRef` is the SoDEX order id), so SSI legs are simulated
+in every mode and the honest phrase is "a signed venue fill". Three surfaces
+claimed the caps bound "everything"/"every cycle" while the gate only governs
+orders that reach the venue. `/portfolio` claimed the mode badge was "the only
+thing that changes between paper and live", which the approval gate falsified.
+`/risk` listed VaR confidence as a limit though nothing gates on VaR. README
+claimed positions were open that had been closed. All corrected; `/risk` now
+lists the position caps and the approval gate.
+
+### Not shipped, and why
+
+- **The Mirror Protocol bridge.** Undocumented to us; see above and
+  `docs/mirror-bridge.md` section 8.
+- **On-chain SSI index creation and on-chain grant enforcement.** Still designs.
+  Delegation is enforced at the application layer and labeled as such.
+- **VaR / correlation as enforced limits.** Measured and published on `/risk`,
+  but only drawdown actually gates a cycle. The drawdown guard has fired once,
+  in a forced test at a temporarily lowered 2% cap; at the shipped 25% it never
+  has (max drawdown since inception 13.3%).
+
+### One-fill mainnet verification
+
+<!-- PHASE 6 EVIDENCE SLOT: do not fill this in until the fill actually happens.
+     It should record: the registered key name, the order id, the fill price and
+     quantity, the sodexOrderId, and the close. If it is empty, the fill has not
+     happened. -->
+
+Pending. The gated mainnet path has not yet been exercised against the live
+venue.
+
+### Carried forward from Wave 2 (recorded at the time)
 
 - Live Mirror Protocol mainnet bridge (the ABI wiring; `lib/chain/bridge.ts`
   carries the config-gated design). Live mainnet execution behind the gated

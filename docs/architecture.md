@@ -38,7 +38,7 @@ lib/prices        SoSoValue per-currency price wrapper with symbol resolver
 lib/sodex         executor facade routes placeOrder by SONAR_EXECUTION_MODE:
                     paper.ts     Wave 1 paper engine (still the default)
                     live.ts      EIP-712 signed orders on SoDEX testnet
-                    risk.ts      per-order + per-cycle caps, mode gate
+                    risk.ts      dust + per-order + per-cycle + position caps
                     markets.ts   Sonar market -> SoDEX symbol name
                     client.ts    signed client (submitPerpOrder,
                                  getAccountState, transferSpotToPerps, etc.)
