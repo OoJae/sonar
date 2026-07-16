@@ -25,12 +25,19 @@ export const orderKindEnum = pgEnum("order_kind", ["spot", "perp"]);
 export const orderTypeEnum = pgEnum("order_type", ["market", "limit"]);
 export const positionSideEnum = pgEnum("position_side", ["long", "short"]);
 
-// Wave 2 live executor: states the SoDEX testnet round trip flows through.
-// pending: persisted before any network call (idempotency floor).
-// submitted: SoDEX accepted the order and returned a sodexOrderId.
+// States the SoDEX round trip flows through.
+// pending_approval: recorded by a live-mainnet cycle and NEVER submitted. Only
+//   the bearer-gated POST /api/orders/approve moves it on. The autonomous cycle
+//   cannot submit real money; a human claims the row first.
+// pending: persisted before any network call (idempotency floor). On mainnet a
+//   row reaches this only via an approval claim, which also stamps approvedAt.
+// submitted: SoDEX accepted the order and returned a sodexOrderId. Also the
+//   parking state for a poll timeout, so the row stays reconcilable.
 // partially_filled / filled / failed: terminal states from order status polling.
-// rejected: blocked by the risk gate before submission (never reached the wire).
+// rejected: blocked by the risk gate before submission (never reached the wire),
+//   or superseded by a newer pending_approval row for the same market.
 export const orderStatusEnum = pgEnum("order_status", [
+  "pending_approval",
   "pending",
   "submitted",
   "partially_filled",
@@ -151,6 +158,18 @@ export const orders = pgTable("orders", {
   notionalUsd: numeric("notional_usd", { precision: 20, scale: 6 }).notNull(),
   status: orderStatusEnum("status").notNull().default("pending"),
   rejectionReason: text("rejection_reason"),
+  // The execution mode this order was recorded under ("paper" | "live-testnet"
+  // | "live-mainnet"). Load-bearing, not informational: the SoDEX gateway is
+  // chosen from the CURRENT env at submit time (lib/sodex/client.ts sodexChain),
+  // so without this a row queued on mainnet, then approved after someone pulls
+  // the kill switch to testnet, would fill on TESTNET and be recorded as a
+  // mainnet fill. submitApprovedOrder refuses when this does not match.
+  mode: text("mode"),
+  // Approval audit for the live-mainnet human gate. approvedAt is stamped by
+  // the atomic claim in POST /api/orders/approve, which is the only writer that
+  // may move a row out of pending_approval.
+  approvedAt: timestamp("approved_at", { withTimezone: true }),
+  approvedBy: text("approved_by"),
   fillPrice: numeric("fill_price", { precision: 20, scale: 10 }),
   fillQuantity: numeric("fill_quantity", { precision: 30, scale: 12 }),
   feeUsd: numeric("fee_usd", { precision: 20, scale: 6 }),

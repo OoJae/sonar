@@ -36,6 +36,15 @@ type OrderRow = typeof schema.orders.$inferSelect;
 // variants do not cover.
 function statusBadge(status: OrderRow["status"]) {
   switch (status) {
+    case "pending_approval":
+      return (
+        <Badge
+          variant="outline"
+          className="mono text-[10px] uppercase tracking-[0.18em] bg-[color:var(--gold)]/20 text-[color:var(--gold)] border border-[color:var(--gold)]/40"
+        >
+          awaiting approval
+        </Badge>
+      );
     case "pending":
       return (
         <Badge
@@ -144,16 +153,19 @@ export async function OrderPreview({ thesisId }: { thesisId: string }) {
     );
   }
 
-  // Sort: filled first, then submitted/partially, then pending, then failures.
-  // Within a class, sort by created_at ascending so the agent's logical order
-  // is preserved.
+  // Sort: anything awaiting a human first (it is the only row that needs an
+  // action), then filled, then in-flight, then failures. Within a class, sort by
+  // created_at ascending so the agent's logical order is preserved.
+  // This Record is the exhaustiveness check for order_status: adding a status to
+  // the enum without handling it here is a compile error. Keep it that way.
   const rank: Record<OrderRow["status"], number> = {
-    filled: 0,
-    partially_filled: 1,
-    submitted: 2,
-    pending: 3,
-    rejected: 4,
-    failed: 5,
+    pending_approval: 0,
+    filled: 1,
+    partially_filled: 2,
+    submitted: 3,
+    pending: 4,
+    rejected: 5,
+    failed: 6,
   };
   orders.sort((a, b) => {
     const r = rank[a.status] - rank[b.status];
