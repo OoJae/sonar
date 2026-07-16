@@ -79,7 +79,11 @@ In all three cases, the path forward is the same: ask in the buildathon Discord 
 - **Testnet chain id:** 138565 (confirmed via SoDEX docs in [docs/sodex-live.md §3](./sodex-live.md))
 - **Testnet RPC URL:** `https://testnet.valuechain.xyz`. CONFIRMED by probe 2026-05-29 (returns chainId 138565). Wired in [lib/chain/balances.ts](../lib/chain/balances.ts) as the `VALUECHAIN_RPC_URL` default and in `app/providers.tsx`. (This entry read UNCONFIRMED until 2026-07-17; the probe had happened but was never written back here.)
 - **Testnet explorer:** still UNCONFIRMED. Likely `https://testnet-scan.valuechain.xyz` mirroring the mainnet pattern. Nothing depends on it.
-- **Testnet USDC contract:** RESOLVED and set in `.env.local` as `VALUECHAIN_USDC_ADDRESS`; the three-balance panel reads it. On `live-mainnet` the same var carries the ValueChain **mainnet** USDC address instead, and the boot guard requires it (see [lib/utils/env.ts](../lib/utils/env.ts)). Note this was only ever needed for the balance read: the bridge widget it was also blocking does not exist and is not planned (see §2).
+- **Testnet USDC contract:** `0x3fFe1743c2Cb5C9c9ED23d8CF62dD7aFABD4eE05` (symbol `vUSDC`). Set in `.env.local` as `VALUECHAIN_USDC_ADDRESS`; the three-balance panel reads it. Note this was only ever needed for the balance read: the bridge widget it was also blocking does not exist and is not planned (see §2).
+- **Mainnet RPC URL:** `https://rpc.valuechain.xyz`. CONFIRMED by probe 2026-07-17 (returns chainId `0x45f9f` = 286623). `https://mainnet-rpc.valuechain.xyz` also answers with the same chain id; `main-rpc.valuechain.xyz` does not resolve.
+- **Mainnet USDC contract:** `0xcb7F80Dff2727c791fA491722c428e6657f7e2c6`. CONFIRMED by probe 2026-07-17 against ValueChain mainnet: `name()` = "SoDexToken: USDC", `symbol()` = `vUSDC`, `decimals()` = 6, `totalSupply()` = 32,968,046.51. It is a distinct contract from the testnet deployment above (same symbol, per-chain deployment), and it has no code on the testnet chain.
+
+  **Both of these must be swapped together when flipping to `live-mainnet`**, because `VALUECHAIN_RPC_URL` and `VALUECHAIN_USDC_ADDRESS` are single vars shared across modes. Swapping one without the other reads a token address on the chain that does not host it, which returns no code and renders a balance of 0: wrong, and silently so, since "0" is also the legitimate by-design value (the agent's capital lives in the SoDEX venue ledger, not the wallet).
 
 ---
 
