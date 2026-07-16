@@ -67,6 +67,11 @@ const EnvShape = z.object({
   // that reduce exposure are never gated by either.
   SONAR_MAX_POSITION_NOTIONAL_USD: z.coerce.number().positive().default(1000),
   SONAR_MAX_GROSS_EXPOSURE_USD: z.coerce.number().positive().default(3000),
+  // How long a live-mainnet order may sit awaiting human approval before it is
+  // refused. A stale row would market-order a notional sized days ago, under a
+  // thesis whose own 36h freshness rule expired long before. Default 2h: well
+  // inside one daily cycle, so at most one order is ever approvable per market.
+  SONAR_APPROVAL_TTL_MINUTES: z.coerce.number().positive().default(120),
   // Wave 3 session-key delegation. When "true", every order must be covered by
   // an active user-signed grant to the agent session key or the executor blocks
   // it. Default off so the autonomous cron trades under operator authority as

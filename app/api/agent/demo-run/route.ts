@@ -21,6 +21,26 @@ export const dynamic = "force-dynamic";
 // CRON_SECRET or the private key.
 export async function POST(request: Request) {
   const e = env();
+
+  // This endpoint is public by design, which is safe in paper and live-testnet:
+  // a stranger can only make the agent do what it would do on its own schedule.
+  // On live-mainnet that stops being true in one specific way. The cycle cannot
+  // submit (orders are recorded for human approval), but it CAN record, so an
+  // anonymous caller could keep minting rows into the operator's approval queue.
+  // Nothing would move funds, but "which of these is the real one" is exactly how
+  // a wrong click happens. Explain instead of running.
+  if (e.SONAR_EXECUTION_MODE === "live-mainnet") {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "mainnet_demo_disabled",
+        message:
+          "Sonar is running on mainnet, where every order is queued for human approval rather than placed. The public demo trigger is disabled here so the approval queue stays operator-controlled. The daily cycle still runs on schedule and its reasoning is published on /signals.",
+      },
+      { status: 200 },
+    );
+  }
+
   const { count, windowSec } = parseRateLimit(e.SONAR_PUBLIC_RUN_RATELIMIT);
 
   // Use X-Real-IP (nginx sets it from $remote_addr, unspoofable through the

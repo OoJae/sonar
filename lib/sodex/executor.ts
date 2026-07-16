@@ -46,14 +46,29 @@ export async function placeOrder(
 
   const mode = env().SONAR_EXECUTION_MODE;
 
-  if (mode === "live-mainnet") {
-    throw new Error(
-      "live-mainnet execution is disabled in Wave 2. Set SONAR_EXECUTION_MODE=live-testnet or paper.",
-    );
-  }
-
   if (mode === "paper") {
     return paper.placeOrder(req);
+  }
+
+  if (mode === "live-mainnet") {
+    // Real money. The autonomous cycle may RECORD an order but never submit it:
+    // recordPendingMainnetOrder runs the full risk gate, persists the capped
+    // notional as pending_approval, and throws. Only the bearer-gated
+    // POST /api/orders/approve reaches the wire from here. Every caller of this
+    // facade (cron, /api/agent/run, the public /api/agent/demo-run, the
+    // delta-neutral strategy) therefore inherits the gate for free.
+    const resolution = resolveMarket(req.market);
+    if (!resolution.tradeable) {
+      // SSI legs are paper in every mode, mainnet included; rebalances mint or
+      // burn via SSI Protocol on Base, not as a SoDEX trade.
+      logger.info("executor.routed_to_paper", {
+        market: req.market,
+        reason: resolution.reason,
+        mode,
+      });
+      return paper.placeOrder(req);
+    }
+    return live.recordPendingMainnetOrder(req);
   }
 
   // mode === "live-testnet": route per-market.

@@ -13,6 +13,7 @@ import { ThesisSchema, type Thesis, type UniverseKey } from "./thesis";
 // live-mainnet switching is governed by SONAR_EXECUTION_MODE; the runner
 // stays the same regardless. See lib/sodex/executor.ts for the routing rules.
 import { placeOrder, getPositions, markToMarket } from "@/lib/sodex/executor";
+import { PendingApprovalError, OrderAttributionError } from "@/lib/sodex/live";
 import { computeAllNavs } from "@/lib/ssi/nav";
 import { getEtfSummaryHistory } from "@/lib/sosovalue/client";
 import { evaluateMacroWindow, type BreakerState } from "@/lib/agent/circuit-breaker";
@@ -492,10 +493,28 @@ async function executeAllocations(
         slippageBps: 50,
       });
     } catch (err) {
-      logger.warn("agent.allocation_skipped", {
-        market,
-        error: err instanceof Error ? err.message : String(err),
-      });
+      // A queued mainnet order is a success, not a skip. SSI legs route to paper
+      // even on mainnet so this should not fire for them, but branch honestly
+      // rather than mislabel it if it ever does.
+      if (err instanceof PendingApprovalError) {
+        logger.info("agent.allocation_pending_approval", {
+          market,
+          orderId: err.orderId,
+          notionalUSD: err.notionalUSD,
+        });
+      } else if (err instanceof OrderAttributionError) {
+        // The order was DROPPED, not queued. Loud, because nothing is waiting to
+        // be approved and the operator would otherwise never know.
+        logger.error("agent.allocation_dropped", {
+          market,
+          error: err.message,
+        });
+      } else {
+        logger.warn("agent.allocation_skipped", {
+          market,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
   }
   for (const hedge of thesis.hedges) {
@@ -511,10 +530,25 @@ async function executeAllocations(
         slippageBps: 50,
       });
     } catch (err) {
-      logger.warn("agent.hedge_skipped", {
-        market: hedge.market,
-        error: err instanceof Error ? err.message : String(err),
-      });
+      if (err instanceof PendingApprovalError) {
+        // Expected on live-mainnet: the hedge is recorded and waiting for a
+        // human. Not a failure.
+        logger.info("agent.hedge_pending_approval", {
+          market: hedge.market,
+          orderId: err.orderId,
+          notionalUSD: err.notionalUSD,
+        });
+      } else if (err instanceof OrderAttributionError) {
+        logger.error("agent.hedge_dropped", {
+          market: hedge.market,
+          error: err.message,
+        });
+      } else {
+        logger.warn("agent.hedge_skipped", {
+          market: hedge.market,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
   }
 }

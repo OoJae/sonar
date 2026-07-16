@@ -14,6 +14,7 @@ import { logger } from "@/lib/utils/logger";
 import { getPriceUSD } from "@/lib/prices";
 import { readIndexSnapshot } from "@/lib/ssi/reader";
 import { placeOrder, getPositions } from "@/lib/sodex/executor";
+import { PendingApprovalError } from "@/lib/sodex/live";
 import { persistThesis } from "@/lib/agent/persist";
 import { ThesisSchema } from "@/lib/agent/thesis";
 import type { OrderRequestInput, PaperPosition } from "@/lib/sodex/types";
@@ -56,6 +57,23 @@ export async function runDeltaNeutral(
   runId: string,
   deRiskFactor = 1,
 ): Promise<void> {
+  // This strategy is all-or-nothing by construction: it is only "delta-neutral"
+  // if the long and the hedge exist together. On live-mainnet they cannot: the
+  // SSI long routes to paper and fills instantly, while the BTC perp hedge is
+  // recorded for human approval and does not. Running anyway would fill the long,
+  // queue the hedge, and publish a "delta-neutral" book on /track that is 100%
+  // NET LONG, and it would never self-heal (the next cycle sees the long already
+  // in place and re-queues only the hedge, forever). A strategy whose hedge needs
+  // a human cannot run autonomously; say so and skip.
+  if (env().SONAR_EXECUTION_MODE === "live-mainnet") {
+    logger.info("delta_neutral.skipped_mainnet", {
+      runId,
+      reason:
+        "hedge legs require human approval on live-mainnet, so the paired long would execute unhedged",
+    });
+    return;
+  }
+
   const scale = Math.max(0, Math.min(1, deRiskFactor));
   const N = env().SONAR_MAX_NOTIONAL_PER_ORDER * scale;
   if (N < DUST_USD) return;
@@ -180,10 +198,19 @@ export async function runDeltaNeutral(
     try {
       await placeOrder(leg);
     } catch (err) {
-      logger.warn("delta_neutral.leg_skipped", {
-        market: leg.market,
-        error: err instanceof Error ? err.message : String(err),
-      });
+      // Unreachable on mainnet (the strategy skips entirely up top), but branch
+      // anyway so a queued leg can never be mislabelled as a skipped one.
+      if (err instanceof PendingApprovalError) {
+        logger.info("delta_neutral.leg_pending_approval", {
+          market: leg.market,
+          orderId: err.orderId,
+        });
+      } else {
+        logger.warn("delta_neutral.leg_skipped", {
+          market: leg.market,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
   }
   logger.info("delta_neutral.executed", {

@@ -52,6 +52,19 @@ export async function notifyCycleFinished(input: {
           )
           .join(", ");
       }
+      // On live-mainnet a cycle places nothing; it queues. Without this the
+      // broadcast would report "no live fills this cycle" next to a green run
+      // and nothing would tell the human that orders are waiting on them, which
+      // is the one thing the approval gate depends on.
+      const awaiting = orders.filter((o) => o.status === "pending_approval");
+      if (awaiting.length > 0) {
+        const queued = awaiting
+          .map((o) => `${o.market} ${o.side} $${Math.round(Number(o.notionalUsd))}`)
+          .join(", ");
+        fillsLine =
+          `${awaiting.length} order${awaiting.length === 1 ? "" : "s"} awaiting approval: ${queued}` +
+          (filled.length > 0 ? ` | filled: ${fillsLine}` : "");
+      }
     } catch {
       // fills line is best-effort
     }

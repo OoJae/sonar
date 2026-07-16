@@ -193,11 +193,19 @@ export function enforceGrossExposureCap(input: {
 }
 
 // Mode gate. Called by the live executor on each placeOrder invocation as
-// a defence-in-depth against env reload races. Mainnet additionally requires
-// SONAR_ALLOW_MAINNET=true and SONAR_REQUIRE_MANUAL_APPROVAL=true; the boot
-// guard in lib/utils/env.ts catches the misconfiguration earlier, but
-// re-checking here means a live cycle cannot slip through if the env state
-// changes mid-process.
+// Cheap belt-and-braces re-assert of the two mainnet opt-in flags.
+//
+// Read this honestly: it is NOT the gate, and nothing should rely on it. Both
+// flags are already enforced at boot (lib/utils/env.ts superRefine) and env() is
+// cached for the process lifetime, so on any process that is running at all in
+// live-mainnet both are provably true and this function cannot throw. It is kept
+// only because it costs nothing and would catch a future refactor that made env
+// mutable.
+//
+// The real gates on the real-money path are elsewhere and are load-bearing:
+// the record-time risk caps in recordPendingMainnetOrder, and in
+// submitApprovedOrder the mode check, the row.mode binding, the approval TTL,
+// the delegation re-check, and the venue-reading position/gross caps.
 export function assertModeAllowed(): void {
   const mode = env().SONAR_EXECUTION_MODE;
   if (mode === "live-mainnet") {
@@ -211,12 +219,6 @@ export function assertModeAllowed(): void {
         "live-mainnet mode requires SONAR_REQUIRE_MANUAL_APPROVAL=true; refusing without forced manual approval.",
       );
     }
-    // Mainnet code path is not implemented in Wave 2; defend against any
-    // accidental wiring. The executor facade already throws, this is the
-    // second backstop.
-    throw new Error(
-      "live-mainnet execution is disabled in Wave 2; only live-testnet is supported.",
-    );
   }
 }
 

@@ -130,18 +130,20 @@ export async function computeTrackData(): Promise<TrackData> {
   const tradeCount = theses.filter((t) => t.mode === "trade").length;
   const noTradeCount = theses.filter((t) => t.mode === "no-trade").length;
 
-  // Notional placed per thesis (orders + paper_trades), for the attribution table.
+  // Notional actually placed per thesis, for the attribution table.
+  //
+  // ONE ledger: paper_trades. It already carries every executed leg in every
+  // mode, live fills included (lib/sodex/live.ts writes a paper_trades row from
+  // the real fill price x quantity alongside the orders row), and it only exists
+  // once an order actually executed.
+  //
+  // This previously summed `orders` too, which double-counted every live fill
+  // (the same fill has a row in both tables) and counted rows that never reached
+  // the venue at all as "placed". With the approval gate that would get worse
+  // still: an order queued for a human and never approved would be published as
+  // notional we placed. Do not re-add an `orders` sum here.
   const notionalByThesis = new Map<string, number>();
   try {
-    const orderRows = await db()
-      .select({ thesisId: schema.orders.thesisId, notional: schema.orders.notionalUsd })
-      .from(schema.orders);
-    for (const o of orderRows) {
-      notionalByThesis.set(
-        o.thesisId,
-        (notionalByThesis.get(o.thesisId) ?? 0) + Number(o.notional),
-      );
-    }
     const tradeRows = await db()
       .select({ thesisId: schema.paperTrades.thesisId, notional: schema.paperTrades.notionalUsd })
       .from(schema.paperTrades);

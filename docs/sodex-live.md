@@ -167,7 +167,42 @@ Account state on testnet is an **UNSIGNED** public read. An unauthenticated `cur
 Confirm via curl during executor implementation. The discovered list goes into `lib/sodex/markets.ts` as the Sonar-market → SoDEX-symbolID mapping.
 
 ### 5.2 clOrdID (idempotency)
-The `clOrdID` is a client-side idempotency key. The Wave 2 plan computes it as `keccak256(thesisId + market + cycleSeq)` so a retried cycle never double-places. Server-side: if a `clOrdID` collides with an existing order for the same account, the server should return the existing order rather than creating a new one. **UNCONFIRMED** the exact collision response shape; verify with the mandatory double-run smoke test (`scripts/sodex-live-smoke.ts`).
+
+The `clOrdID` is a client-side idempotency key, computed as
+`keccak256(strategy + thesisId + market)` and formatted `sonar-<16 hex>` (a bare
+`0x...` hex string is rejected with `clOrdID is invalid`).
+
+**The venue does NOT dedupe it. CONFIRMED on testnet 2026-07-16** by
+`scripts/sodex-clordid-dedupe-probe.ts`, which submits the same clOrdID to the
+wire twice:
+
+```
+Submit #1 -> sodexOrderId=2331400471 status=NEW
+Submit #2 (SAME clOrdID) -> sodexOrderId=2331400473 status=NEW
+VERDICT: NOT DEDUPED, a SECOND order was created. Both filled.
+```
+
+This page previously said the server "should return the existing order rather
+than creating a new one", marked UNCONFIRMED, since May. That was wrong, and the
+distinction is load-bearing:
+
+- **Idempotency is entirely ours.** The `orders.client_order_id` UNIQUE
+  constraint plus the existing-row branch in `lib/sodex/live.ts:placeOrder` are
+  the only things preventing a double-place. The venue will happily take the same
+  key twice and open two positions.
+- **The mainnet approval gate depends on this.** `POST /api/orders/approve`
+  claims a row with a conditional `UPDATE ... WHERE status='pending_approval'`
+  and that claim is the ONLY writer; a second click matches zero rows and stops.
+  Do not add a "resume a stranded row" path to it. It reads as harmless recovery
+  and would be two real market orders. Crash recovery lives in
+  `POST /api/orders/reconcile`, which never submits: it asks the venue what it
+  actually saw (`findOrderByClOrdID`) and either adopts that order or hands the
+  row back to the human.
+
+Note also that the earlier "idempotency" assertion in `scripts/sodex-live-smoke.ts`
+does **not** test this: its second `placeOrder` call is served from our own DB by
+the idempotency branch and never reaches the network. The dedupe probe is the
+only thing that exercises the wire twice.
 
 ### 5.3 Buy vs sell encoding
 The docs example shows `side: 1` for a buy. The sell value is **UNCONFIRMED**; try `side: 2` first (common convention), fall back to `side: 0` if rejected. Document the working value in the changelog once verified.
