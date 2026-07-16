@@ -38,8 +38,10 @@ const EnvShape = z.object({
   BASE_RPC_URL: z.string().url().default("https://mainnet.base.org"),
   VALUECHAIN_RPC_URL: z.string().url().default("https://rpc.valuechain.xyz"),
 
-  // SoDEX live client (Wave 1: spot pair listing only). Mainnet API-key name.
-  // Testnet uses SODEX_WALLET_PRIVATE_KEY directly per docs/sodex-live.md §1.
+  // SoDEX live client (Wave 1: spot pair listing only). On live-mainnet this is
+  // the NAME of the API key registered via scripts/sodex-mainnet-register.ts,
+  // sent as X-API-Key. Testnet omits X-API-Key and signs with
+  // SODEX_WALLET_PRIVATE_KEY directly per docs/sodex-live.md §1.
   SODEX_API_KEY: z.string().min(1).optional(),
   SODEX_BASE_URL: z.string().url().default("https://api.sodex.com"),
 
@@ -119,6 +121,12 @@ const EnvShape = z.object({
     .string()
     .url()
     .default("https://testnet-gw.sodex.dev/api/v1"),
+  // Mainnet gateway. Like the testnet URL it must carry /api/v1; do not strip.
+  // Only read when SONAR_EXECUTION_MODE=live-mainnet (docs/sodex-live.md §2).
+  SODEX_MAINNET_BASE_URL: z
+    .string()
+    .url()
+    .default("https://mainnet-gw.sodex.dev/api/v1"),
   SODEX_API_SECRET: z.string().min(1).optional(),
   // Hex-encoded 32-byte private key (0x + 64 hex chars). Server-side only.
   // Used by viem privateKeyToAccount() for EIP-712 SoDEX signing. Never log.
@@ -129,11 +137,26 @@ const EnvShape = z.object({
         "SODEX_WALLET_PRIVATE_KEY must be a 0x-prefixed 32-byte hex string",
     })
     .optional(),
+  // Mainnet signs writes with a SEPARATE registered keypair, not the master
+  // wallet (docs/sodex-live.md §13): the master calls addAPIKey once to
+  // register SODEX_API_KEY (the name) against this key's address, then every
+  // signed write is signed by this key. Master stays the account owner, so a
+  // leak of this key is master-revocable. Server-side only. Never log.
+  SODEX_MAINNET_SIGNING_KEY: z
+    .string()
+    .regex(/^0x[0-9a-fA-F]{64}$/, {
+      message:
+        "SODEX_MAINNET_SIGNING_KEY must be a 0x-prefixed 32-byte hex string",
+    })
+    .optional(),
 
-  // Wave 2 cross-chain: USDC contract addresses + Mirror Protocol bridge.
-  // Base mainnet USDC default is Circle's well-known address. ValueChain
-  // testnet USDC and the bridge contracts are UNCONFIRMED pending Discord
-  // (see docs/mirror-bridge.md).
+  // Cross-chain: USDC contract addresses + Mirror Protocol bridge.
+  // Base mainnet USDC default is Circle's well-known address.
+  // VALUECHAIN_USDC_ADDRESS carries the testnet USDC on live-testnet and the
+  // ValueChain MAINNET USDC on live-mainnet (it is the margin asset deposited
+  // into the SoDEX account; funding is a direct deposit, not a bridge hop).
+  // The Mirror bridge contracts are still UNCONFIRMED pending Discord, so the
+  // bridge stays dormant and off the funding path (see docs/mirror-bridge.md).
   BASE_USDC_ADDRESS: z
     .string()
     .regex(/^0x[0-9a-fA-F]{40}$/)
@@ -210,8 +233,9 @@ const EnvSchema = EnvShape.superRefine((cfg, ctx) => {
     });
   }
 
-  // Mainnet is gated behind a second explicit opt-in plus forced manual approval.
-  // See docs/sodex-live.md §0 and CLAUDE-WAVE2.md §3.5.
+  // Mainnet is gated behind a second explicit opt-in plus forced manual approval,
+  // and it needs the registered-key credentials the mainnet auth flow signs with.
+  // See docs/sodex-live.md §0 + §13.
   if (cfg.SONAR_EXECUTION_MODE === "live-mainnet") {
     if (!cfg.SONAR_ALLOW_MAINNET) {
       ctx.addIssue({
@@ -227,6 +251,33 @@ const EnvSchema = EnvShape.superRefine((cfg, ctx) => {
         path: ["SONAR_REQUIRE_MANUAL_APPROVAL"],
         message:
           "SONAR_REQUIRE_MANUAL_APPROVAL must be \"true\" on live-mainnet (forced manual approval is mandatory)",
+      });
+    }
+    // Mainnet writes are signed by the registered key and stamped with its name
+    // (X-API-Key); missing either would fail at the first signed action.
+    if (!cfg.SODEX_API_KEY) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["SODEX_API_KEY"],
+        message:
+          "SODEX_API_KEY (the registered mainnet key name, sent as X-API-Key) is required on live-mainnet; register it with scripts/sodex-mainnet-register.ts",
+      });
+    }
+    if (!cfg.SODEX_MAINNET_SIGNING_KEY) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["SODEX_MAINNET_SIGNING_KEY"],
+        message:
+          "SODEX_MAINNET_SIGNING_KEY is required on live-mainnet (the registered key signs every write; the master wallet only registers it)",
+      });
+    }
+    // The margin asset must be known before any real funds are deposited.
+    if (!cfg.VALUECHAIN_USDC_ADDRESS) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["VALUECHAIN_USDC_ADDRESS"],
+        message:
+          "VALUECHAIN_USDC_ADDRESS (ValueChain mainnet USDC) is required on live-mainnet; it is the margin asset",
       });
     }
   }
