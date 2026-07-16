@@ -11,8 +11,9 @@
 //      regardless of any retry path; this is the load-bearing idempotency.
 //   2. Insert the orders row as `pending`. On unique-violation, the previous
 //      attempt's row is read and we resume from its state.
-//   3. Inline cap check (downsize to per-order cap, fail on per-cycle cap).
-//      Replaced with lib/sodex/risk.ts in Phase 2.3.
+//   3. Risk gate (lib/sodex/risk.ts): dust floor, per-order downsize,
+//      per-cycle cap, then the position caps (per-market + gross) that bound
+//      the resulting book. Reducing orders are never gated.
 //   4. Sign + POST /perps/trade/orders via lib/sodex/client.ts.
 //   5. Update the orders row to `submitted` with the SoDEX order id.
 //   6. Poll listPerpOrders by clOrdID with capped backoff until terminal.
@@ -31,14 +32,18 @@ import { resolveMarket } from "./markets";
 import { getPriceUSD } from "@/lib/prices";
 import {
   findOrderByClOrdID,
+  getGrossPerpExposureUsd,
+  getPerpPositionUsd,
   getPerpSymbolInfo,
   listPerpOrders,
   submitPerpOrder,
 } from "./client";
 import {
   assertModeAllowed,
+  enforceGrossExposureCap,
   enforcePerCycleCap,
   enforcePerOrderCap,
+  enforcePositionCap,
   isDust,
   recordPlaced,
 } from "./risk";
@@ -151,8 +156,8 @@ export async function placeOrder(
       `Order notional $${req.notionalUSD} for ${req.market} is below the dust floor; the runner should drop these before reaching the executor.`,
     );
   }
-  const { notionalUSD: capped } = enforcePerOrderCap(req.notionalUSD);
-  const cycleCheck = enforcePerCycleCap(runId, capped);
+  const { notionalUSD: perOrderCapped } = enforcePerOrderCap(req.notionalUSD);
+  const cycleCheck = enforcePerCycleCap(runId, perOrderCapped);
   if (!cycleCheck.allow) {
     const id = await insertOrderRow({
       clOrdID,
@@ -162,13 +167,64 @@ export async function placeOrder(
       market: resolution.symbolName,
       kind: "perp",
       side: req.side,
-      notionalUSD: capped,
+      notionalUSD: perOrderCapped,
       status: "rejected",
       rejectionReason: cycleCheck.reason,
     });
     void id;
     throw new Error(`Order rejected by risk gate: ${cycleCheck.reason}`);
   }
+
+  // Position caps (risk.ts layer 4): bound the resulting book, not just the
+  // flow. Read the venue's actual position for this market, since it is
+  // authoritative for what we are about to add to. A reducing order passes
+  // both gates untouched.
+  const currentPositionUSD = await getPerpPositionUsd(resolution.symbolName);
+  const positionCheck = enforcePositionCap({
+    market: resolution.symbolName,
+    side: req.side,
+    notionalUSD: perOrderCapped,
+    currentPositionUSD,
+  });
+  if (!positionCheck.allow) {
+    await insertOrderRow({
+      clOrdID,
+      thesisId: req.thesisId,
+      strategy: req.strategy,
+      runId,
+      market: resolution.symbolName,
+      kind: "perp",
+      side: req.side,
+      notionalUSD: perOrderCapped,
+      status: "rejected",
+      rejectionReason: positionCheck.reason,
+    });
+    throw new Error(`Order rejected by risk gate: ${positionCheck.reason}`);
+  }
+
+  const grossCheck = enforceGrossExposureCap({
+    market: resolution.symbolName,
+    notionalUSD: positionCheck.notionalUSD,
+    grossExposureUSD: await getGrossPerpExposureUsd(),
+    reducing: positionCheck.reducing,
+  });
+  if (!grossCheck.allow) {
+    await insertOrderRow({
+      clOrdID,
+      thesisId: req.thesisId,
+      strategy: req.strategy,
+      runId,
+      market: resolution.symbolName,
+      kind: "perp",
+      side: req.side,
+      notionalUSD: positionCheck.notionalUSD,
+      status: "rejected",
+      rejectionReason: grossCheck.reason,
+    });
+    throw new Error(`Order rejected by risk gate: ${grossCheck.reason}`);
+  }
+
+  const capped = grossCheck.notionalUSD;
 
   // Insert as pending; the UNIQUE constraint on client_order_id is the DB-level
   // backstop. Concurrent inserts with the same clOrdID will throw and the

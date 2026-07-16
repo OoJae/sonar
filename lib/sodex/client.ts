@@ -482,6 +482,56 @@ export async function getAccountState(opts?: {
   return parsed.data;
 }
 
+// ---------------------------------------------------------------------------
+// Public API: getPerpPositionUsd
+//
+// Signed USD notional of the CURRENT open position in one perp market:
+// positive is long, negative is short, 0 is flat. The venue is authoritative
+// here (not our paper book), because the position cap has to bound what the
+// exchange actually holds.
+//
+// Notional is |size| * mark, signed by the size. `cp` (mark) is preferred but
+// is not always populated (observed "0" on an open SOL-USD position), so we
+// fall back to `ep` (entry). A position we cannot price returns 0, which is
+// the conservative direction for a REDUCING order (never block a de-risk) but
+// would under-count an increasing one; the per-order and per-cycle caps still
+// bound that case.
+// ---------------------------------------------------------------------------
+export async function getPerpPositionUsd(symbolName: string): Promise<number> {
+  const state = await getAccountState({ kind: "perps" });
+  const positions = state.P ?? [];
+  const match = positions.find((p) => p.s === symbolName);
+  if (!match) return 0;
+  const size = Number(match.sz ?? 0);
+  if (!Number.isFinite(size) || size === 0) return 0;
+  const mark = Number(match.cp ?? 0);
+  const entry = Number(match.ep ?? 0);
+  const price = Number.isFinite(mark) && mark > 0 ? mark : entry;
+  if (!Number.isFinite(price) || price <= 0) {
+    logger.warn("sodex.position_unpriced", { symbolName, size });
+    return 0;
+  }
+  return size * price;
+}
+
+// Gross USD notional across every open perp position (sum of absolute values).
+// Used by the gross-exposure gate.
+export async function getGrossPerpExposureUsd(): Promise<number> {
+  const state = await getAccountState({ kind: "perps" });
+  const positions = state.P ?? [];
+  let gross = 0;
+  for (const p of positions) {
+    const size = Number(p.sz ?? 0);
+    if (!Number.isFinite(size) || size === 0) continue;
+    const mark = Number(p.cp ?? 0);
+    const entry = Number(p.ep ?? 0);
+    const price = Number.isFinite(mark) && mark > 0 ? mark : entry;
+    if (!Number.isFinite(price) || price <= 0) continue;
+    gross += Math.abs(size * price);
+  }
+  return gross;
+}
+
 // In-process cache of the per-kind account id. The aid is stable per process
 // and only the first call hits the wire; the rest are O(1).
 const aidCache = new Map<Kind, number>();
@@ -655,6 +705,13 @@ export type SubmitPerpOrderInput = {
   // Optional: defaults to Both (one-way mode). For explicit hedging on
   // hedge-mode accounts, set Long or Short.
   positionSide?: "both" | "long" | "short";
+  // Marks the order as strictly position-reducing. This is not cosmetic: with
+  // reduceOnly false the engine margins the order as NEW exposure, so once an
+  // account is at its margin limit even a closing order is rejected with
+  // "insufficient margin" and the position cannot be exited (observed on
+  // testnet 2026-07-16 while trying to flatten an over-leveraged book). Any
+  // close must set this true.
+  reduceOnly?: boolean;
 };
 
 export type SubmitPerpOrderResult = {
@@ -720,7 +777,7 @@ export async function submitPerpOrder(
     ...(input.price !== undefined ? { price: input.price } : {}),
     ...(input.quantity !== undefined ? { quantity: input.quantity } : {}),
     ...(input.funds !== undefined ? { funds: input.funds } : {}),
-    reduceOnly: false,
+    reduceOnly: input.reduceOnly ?? false,
     positionSide:
       input.positionSide === "long"
         ? SodexPositionSide.Long

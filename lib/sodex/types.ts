@@ -113,9 +113,33 @@ export function mapSodexStatus(
 
 // Account state response. We only read `aid` (account id); everything else
 // flows through .passthrough().
+// One open perp position from the account state's `P` array. Single-character
+// field codes, like the order snapshot. Confirmed against the live testnet
+// state 2026-07-16. Only the fields the position cap needs are typed; the rest
+// (leverage, liquidation price, funding) pass through.
+//   s  symbol name, e.g. "BTC-USD"
+//   sz SIGNED size in base units: negative is short ("-0.23409")
+//   ep entry price
+//   cp current/mark price. Not always populated (observed "0" on SOL-USD),
+//      so consumers must fall back to ep.
+//   ur unrealized pnl
+export const PerpPositionSchema = z
+  .object({
+    s: z.string(),
+    sz: z.union([z.string(), z.number()]),
+    ep: z.union([z.string(), z.number()]).optional(),
+    cp: z.union([z.string(), z.number()]).optional(),
+    ur: z.union([z.string(), z.number()]).optional(),
+  })
+  .passthrough();
+export type PerpPosition = z.infer<typeof PerpPositionSchema>;
+
 export const AccountStateSchema = z
   .object({
     aid: z.number(),
+    // Open positions. Absent on the spot engine, and null rather than [] when
+    // the perps book is empty, so both are tolerated.
+    P: z.array(PerpPositionSchema).nullish(),
   })
   .passthrough();
 export type AccountState = z.infer<typeof AccountStateSchema>;

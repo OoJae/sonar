@@ -59,6 +59,14 @@ const EnvShape = z.object({
     .transform((v) => v === "true"),
   SONAR_MAX_NOTIONAL_PER_ORDER: z.coerce.number().positive().default(500),
   SONAR_MAX_NOTIONAL_PER_CYCLE: z.coerce.number().positive().default(2000),
+  // Position caps. The per-order and per-cycle caps bound the FLOW; these bound
+  // the resulting BOOK. Without them a thesis that hedges the same direction
+  // every cycle compounds into an unbounded position (it did: see risk.ts
+  // layer 4). Per-market is the absolute notional one market's position may
+  // reach; gross is the sum of absolute notionals across all markets. Orders
+  // that reduce exposure are never gated by either.
+  SONAR_MAX_POSITION_NOTIONAL_USD: z.coerce.number().positive().default(1000),
+  SONAR_MAX_GROSS_EXPOSURE_USD: z.coerce.number().positive().default(3000),
   // Wave 3 session-key delegation. When "true", every order must be covered by
   // an active user-signed grant to the agent session key or the executor blocks
   // it. Default off so the autonomous cron trades under operator authority as
