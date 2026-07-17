@@ -260,7 +260,7 @@ live run is:
 | `UPSTASH_REDIS_REST_URL` | recommended | Upstash console |
 | `UPSTASH_REDIS_REST_TOKEN` | recommended | Upstash console |
 | `BASE_RPC_URL` | yes (defaulted) | `https://mainnet.base.org` |
-| `VALUECHAIN_RPC_URL` | yes (defaulted) | `https://rpc.valuechain.xyz` |
+| `VALUECHAIN_RPC_URL` | yes (defaulted) | `https://testnet.valuechain.xyz` (mainnet RPC only via the mode drop-in) |
 | `CRON_SECRET` | required in prod | `openssl rand -hex 24` |
 | `SONAR_ADMIN_ADDRESSES` | only for the mode toggle | comma-separated 0x addresses |
 | `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` | optional | https://cloud.langfuse.com |

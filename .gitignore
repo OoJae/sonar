@@ -50,3 +50,4 @@ AGENTS.md
 sonar-wave2-build-playbook.md
 .githooks/
 scripts/lint-prose.sh
+.cron-auth

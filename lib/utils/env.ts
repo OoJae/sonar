@@ -3,6 +3,7 @@ import {
   VALUECHAIN_MAINNET_USDC,
   VALUECHAIN_TESTNET_USDC,
   VALUECHAIN_MAINNET_RPC,
+  VALUECHAIN_TESTNET_RPC,
   isMainnetRpc,
   sameAddressLoose,
 } from "@/lib/chain/valuechain";
@@ -43,7 +44,11 @@ const EnvShape = z.object({
 
   // Chain RPCs (public defaults work for reads)
   BASE_RPC_URL: z.string().url().default("https://mainnet.base.org"),
-  VALUECHAIN_RPC_URL: z.string().url().default("https://rpc.valuechain.xyz"),
+  // Default to the TESTNET RPC: the default mode is paper, and the mode-bound
+  // guard below rejects a mainnet RPC on any non-mainnet mode. Defaulting to
+  // mainnet made `cp .env.example .env.local && pnpm dev` fail env validation on
+  // a fresh clone. The mainnet RPC is supplied only by the mode drop-in.
+  VALUECHAIN_RPC_URL: z.string().url().default(VALUECHAIN_TESTNET_RPC),
 
   // SoDEX live client: the Wave 1 unsigned spot-pair-listing helper only.
   // NOT used for execution auth on either venue: both testnet and mainnet sign
