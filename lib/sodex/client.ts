@@ -111,13 +111,23 @@ export async function healthCheck(): Promise<SodexHealth> {
 // ===========================================================================
 // SoDEX signed-request layer (testnet + mainnet).
 //
-// Testnet signs every call with the master wallet private key per the Discord
-// clarification in docs/sodex-live.md §1, and deliberately omits X-API-Key.
-// Mainnet (§13) instead signs with a SEPARATE registered keypair and stamps
-// X-API-Key (the registered NAME) + X-API-Chain; the master wallet only
-// registers that key once via registerApiKey() and owns the funds. Everything
-// else (the payloadHash + uint64 nonce EIP-712 structure in §3, the recovery
-// byte normalization) is identical across both, so only the transport differs.
+// BOTH venues sign identically: the master wallet private key, X-API-Sign +
+// X-API-Nonce only, no X-API-Key. Mainnet differs from testnet in exactly two
+// things, the gateway URL and the EIP-712 domain chainId (286623 vs 138565).
+//
+// docs/sodex-live.md §13 used to claim mainnet required an addAPIKey ceremony
+// registering a separate keypair, sending X-API-Key + X-API-Chain. That is
+// FALSE, and it was never probed until 2026-07-17. There is no addAPIKey
+// endpoint (POST returns "404 page not found"), and a master-signed write with
+// no X-API-Key is accepted by BOTH mainnet engines: the spot transfer answered
+// "insufficient balance" and the perps order answered with body validation,
+// i.e. both got past auth into business logic. A bad signature on this venue
+// looks different and unmistakable ("Invalid recovery ID: bad recovery id").
+//
+// The consequence worth naming: there is no revocable sub-key on this venue.
+// The master wallet that holds the funds is also the key that signs writes. We
+// cannot invent a key model the venue does not implement, so the mitigation is
+// the balance (symbolic) and the approval gate, not key hygiene.
 //
 // The mode is read from SONAR_EXECUTION_MODE and env() is cached, so a mode
 // flip requires an app restart. That also clears aidCache / symbolNameToInfo,
@@ -133,7 +143,6 @@ type Kind = "spot" | "perps";
 type SodexChain = {
   chainId: number;
   baseUrl: string;
-  keyName: string | undefined;
   isMainnet: boolean;
 };
 
@@ -145,14 +154,12 @@ function sodexChain(): SodexChain {
     return {
       chainId: MAINNET_CHAIN_ID,
       baseUrl: e.SODEX_MAINNET_BASE_URL,
-      keyName: e.SODEX_API_KEY,
       isMainnet: true,
     };
   }
   return {
     chainId: TESTNET_CHAIN_ID,
     baseUrl: e.SODEX_TESTNET_BASE_URL,
-    keyName: undefined,
     isMainnet: false,
   };
 }
@@ -171,32 +178,10 @@ function getAccount() {
   return cachedAccount;
 }
 
-// The MASTER wallet address: the SoDEX account owner on both venues. Read URLs
-// and the account id are keyed by this, on mainnet too, even though mainnet
-// writes are signed by the registered key (see getSigningAccount).
+// The MASTER wallet address: the SoDEX account owner, and the signer of every
+// write, on both venues.
 export function getSignerAddress(): `0x${string}` {
   return getAccount().address;
-}
-
-// The account that actually signs a write. Testnet: the master wallet.
-// Mainnet: the separate registered key, whose NAME travels in X-API-Key.
-let cachedSigningAccount: ReturnType<typeof privateKeyToAccount> | null = null;
-function getSigningAccount() {
-  if (!sodexChain().isMainnet) return getAccount();
-  if (cachedSigningAccount) return cachedSigningAccount;
-  const key = env().SODEX_MAINNET_SIGNING_KEY;
-  if (!key) {
-    throw new Error(
-      "SODEX_MAINNET_SIGNING_KEY is not set. Required to sign any live-mainnet action.",
-    );
-  }
-  cachedSigningAccount = privateKeyToAccount(key as `0x${string}`);
-  return cachedSigningAccount;
-}
-
-// The registered key's address, which addAPIKey binds the key name to.
-export function getMainnetSigningAddress(): `0x${string}` {
-  return getSigningAccount().address;
 }
 
 function gateway(kind: Kind): string {
@@ -247,7 +232,6 @@ type SignedAction<T extends Record<string, unknown>> = {
 async function signAction<T extends Record<string, unknown>>(
   kind: Kind,
   action: SignedAction<T>,
-  opts?: { signWithMaster?: boolean },
 ): Promise<{
   sign: `0x${string}`;
   nonce: string;
@@ -256,10 +240,7 @@ async function signAction<T extends Record<string, unknown>>(
   const compactJson = JSON.stringify(action);
   const payloadHash = keccak256(toBytes(compactJson));
   const nonce = nextNonce();
-  // signWithMaster forces the account owner's key: addAPIKey is the one action
-  // the registered key cannot sign, because it is what registers that key.
-  const signer = opts?.signWithMaster ? getAccount() : getSigningAccount();
-  const sig = await signer.signTypedData({
+  const sig = await getAccount().signTypedData({
     domain: eipDomain(kind),
     types: exchangeActionTypes,
     primaryType: "ExchangeAction",
@@ -283,112 +264,18 @@ async function signAction<T extends Record<string, unknown>>(
   };
 }
 
-// Stamp the signed-write headers onto a fetch request.
-//
-// Testnet: two headers by design, X-API-Sign + X-API-Nonce. X-API-Key is
-// omitted (Discord rule) and X-API-Chain is not sent (the Go SDK does not send
-// it and the chain id is already bound into the EIP-712 domain at signing).
-//
-// Mainnet (docs/sodex-live.md §13): the server has to look up WHICH registered
-// key signed, so X-API-Key (the registered name) is required, and §13 documents
-// X-API-Chain alongside it. The signature itself comes from the registered
-// key's keypair (see getSigningAccount).
+// Stamp the signed-write headers onto a fetch request. Two headers on BOTH
+// venues, by design: X-API-Sign + X-API-Nonce. X-API-Key is omitted (the Discord
+// rule for testnet, and probed to be equally true on mainnet, 2026-07-17).
+// X-API-Chain is not sent either; the Go SDK does not send it and the chain id
+// is already bound into the EIP-712 domain at signing time (see signAction).
 function signedHeaders(sign: `0x${string}`, nonce: string): HeadersInit {
-  const base: Record<string, string> = {
+  return {
     "Content-Type": "application/json",
     Accept: "application/json",
     "X-API-Sign": sign,
     "X-API-Nonce": nonce,
   };
-  const chain = sodexChain();
-  if (chain.isMainnet) {
-    if (!chain.keyName) {
-      throw new Error(
-        "SODEX_API_KEY (registered mainnet key name) is not set; refusing to send an unattributable signed mainnet request.",
-      );
-    }
-    base["X-API-Key"] = chain.keyName;
-    base["X-API-Chain"] = String(chain.chainId);
-  }
-  return base;
-}
-
-// ---------------------------------------------------------------------------
-// Public API: registerApiKey (mainnet only, one-shot setup)
-//
-// The mainnet auth ceremony from docs/sodex-live.md §13: the MASTER wallet
-// registers a name against a separate keypair's address, and from then on every
-// signed write is signed by that keypair and attributed via X-API-Key. This is
-// the one action the registered key cannot sign for itself, so it forces the
-// master signer.
-//
-// The request shape follows §13 and the Go SDK. Per the round-2/round-6
-// convention we implement it shape-correct rather than guessing: if a field
-// name is wrong the engine's `code:-1` envelope names it, and this endpoint
-// moves no funds, so surfacing the real error is safe. Verify with a read
-// first (getAccountState) before calling this.
-// ---------------------------------------------------------------------------
-export async function registerApiKey(input: {
-  name: string;
-  signerAddress: `0x${string}`;
-}): Promise<{ ok: true; raw: unknown }> {
-  if (!sodexChain().isMainnet) {
-    throw new Error(
-      "registerApiKey is mainnet-only; testnet signs with the master wallet and needs no registered key.",
-    );
-  }
-  const body = {
-    name: input.name,
-    address: input.signerAddress,
-  };
-  // Signed by the master wallet: it is the account owner authorizing a new key.
-  // The perps domain is used because the key is registered for the trading
-  // surface we submit orders on.
-  const { sign, nonce } = await signAction(
-    "perps",
-    { type: "addAPIKey", params: body },
-    { signWithMaster: true },
-  );
-
-  const url = `${gateway("perps")}/accounts/apikeys`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json",
-      "X-API-Sign": sign,
-      "X-API-Nonce": nonce,
-      // No X-API-Key here: this call is what creates it.
-      "X-API-Chain": String(sodexChain().chainId),
-    },
-    body: JSON.stringify(body),
-    cache: "no-store",
-  });
-  if (!res.ok) {
-    const errBody = await logHttpError("registerApiKey", res, sign, nonce);
-    throw new Error(`SoDEX registerApiKey ${res.status}: ${errBody.slice(0, 300)}`);
-  }
-  const json: unknown = await res.json();
-  logger.info("sodex.register_api_key_response", {
-    name: input.name,
-    signerAddress: input.signerAddress,
-    body: JSON.stringify(json).slice(0, 400),
-  });
-  if (typeof json === "object" && json !== null) {
-    const envelope = json as Record<string, unknown>;
-    if (typeof envelope.code === "number" && envelope.code !== 0) {
-      const message =
-        typeof envelope.message === "string"
-          ? envelope.message
-          : typeof envelope.error === "string"
-            ? envelope.error
-            : JSON.stringify(envelope);
-      throw new Error(
-        `SoDEX registerApiKey rejected: code=${envelope.code} ${message.slice(0, 300)}`,
-      );
-    }
-  }
-  return { ok: true, raw: json };
 }
 
 // Defensive logger for non-2xx responses; never logs the signature beyond a

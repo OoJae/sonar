@@ -6,13 +6,24 @@
 
 ## 0. The single most important rule
 
-The executor uses **testnet only**. Mainnet is gated behind `SONAR_EXECUTION_MODE=live-mainnet` plus `SONAR_ALLOW_MAINNET=true`, and the Wave 2 default keeps mainnet disabled. No real funds in any env. The testnet wallet is disposable; if its key leaks, the loss is zero.
+The default is **testnet**. Mainnet is gated behind `SONAR_EXECUTION_MODE=live-mainnet`
+plus `SONAR_ALLOW_MAINNET=true` plus `SONAR_REQUIRE_MANUAL_APPROVAL=true`, and on
+mainnet the autonomous cycle CANNOT submit: it records risk-capped orders for human
+approval and only `POST /api/orders/approve` places one. See section 13.
+
+On testnet the wallet is disposable and a key leak costs nothing. **On mainnet that
+is not true**: the same master key signs writes and holds the funds (there is no
+sub-key on this venue, see section 13), so the balance IS the blast radius. Keep it
+symbolic.
 
 ---
 
-## 1. Testnet authentication (DIFFERENT from mainnet, per Discord)
+## 1. Authentication (IDENTICAL on testnet and mainnet)
 
-**Testnet does NOT use registered API keys.** The mainnet flow registers an API key (name + signing keypair) per master wallet; testnet skips that entirely and signs directly with the master wallet's EVM private key.
+**Neither net uses registered API keys.** Both sign directly with the master
+wallet's EVM private key. This section said the opposite until 2026-07-17; the
+mainnet claim was inferred, never probed, and false. See section 13 for the probe
+evidence.
 
 ### Required headers on signed requests (testnet)
 - `X-API-Sign`: the EIP-712 signature, 0x01-prefixed (see §3)
@@ -21,16 +32,16 @@ The executor uses **testnet only**. Mainnet is gated behind `SONAR_EXECUTION_MOD
 - `Content-Type: application/json`
 - `Accept: application/json`
 
-**Do NOT send `X-API-Key` on testnet.** The mainnet header is registered-key-name-based; including it on testnet either errors or is silently ignored. The executor must omit it when `SONAR_EXECUTION_MODE=live-testnet`.
+**Do NOT send `X-API-Key` on either net.** There is no registered-key model on this
+venue at all (section 13). The executor omits it in every mode.
 
 ### Signing key
 The `SODEX_WALLET_PRIVATE_KEY` env var holds the master wallet's EVM private key. viem's `privateKeyToAccount(...)` produces the signer; no separate API secret is needed on testnet.
 
-### Mainnet, for reference only (NOT Wave 2 scope)
-- `X-API-Key`: the registered API key NAME (string)
-- `X-API-Sign`: signed by the API key's separate private key (not the master wallet)
-- `X-API-Nonce`: same uint64 unix milliseconds
-- Registered API keys must be created via `addAPIKey` (signed by master wallet)
+### Mainnet (CONFIRMED 2026-07-17, section 13)
+Identical to the above. Same master-wallet signing, same two headers, no
+`X-API-Key`, no `addAPIKey`. The only differences are the gateway host and the
+EIP-712 domain `chainId` (286623).
 
 ---
 
@@ -452,17 +463,61 @@ The shape above is the reference for §5 implementation; field-order and exact a
 
 ---
 
-## 13. What changes for mainnet (NOT Wave 2 scope, documented for completeness)
+## 13. Mainnet auth: identical to testnet (CONFIRMED 2026-07-17)
 
-When `SONAR_EXECUTION_MODE=live-mainnet` (gated behind `SONAR_ALLOW_MAINNET=true` plus a single-digit-USD cap and forced manual approval), the executor switches to the mainnet auth flow:
+**Mainnet signs exactly like testnet.** Master wallet key, `X-API-Sign` +
+`X-API-Nonce` only, no `X-API-Key`, no registration ceremony. The ONLY two
+differences from testnet are:
 
-1. Master wallet calls `addAPIKey` to register a separate API key (name + EVM keypair).
-2. All subsequent signed requests use:
-   - `X-API-Key`: the registered key name
-   - `X-API-Sign`: signed by the registered key's private key (not the master wallet)
-   - `X-API-Nonce`: per-API-key nonce
-   - `X-API-Chain`: `286623`
-3. The verifying contract and domain `chainId` switch to mainnet values.
-4. `mainnet-gw.sodex.dev` replaces `testnet-gw.sodex.dev`.
+| | testnet | mainnet |
+|---|---|---|
+| gateway | `https://testnet-gw.sodex.dev/api/v1` | `https://mainnet-gw.sodex.dev/api/v1` |
+| EIP-712 domain chainId | 138565 | 286623 |
 
-Wave 2 stubs this with `throw new Error("mainnet execution disabled in Wave 2")` in the executor; the implementation lives behind that throw for a future wave.
+Everything else (the `payloadHash` + uint64 nonce structure in section 3, the
+recovery-byte normalization, the two-layer error envelope, the clOrdID format) is
+unchanged.
+
+### What this section used to say, and why it was wrong
+
+It claimed mainnet required an `addAPIKey` ceremony: the master wallet registers a
+name plus a separate EVM keypair, and every later write is signed by that key and
+attributed via `X-API-Key` + `X-API-Chain: 286623`. **All of that is false.** It
+was written from inference, never probed, and code was built against it.
+
+Probed 2026-07-17 against the live mainnet gateway:
+
+- **There is no addAPIKey endpoint.** `POST /perps/accounts/apikeys` returns
+  `404 page not found`. (The path itself was invented, which is the deeper error:
+  section 13 named an action but never an endpoint, and CLAUDE.md section 11 says
+  do not invent paths.)
+- **A master-signed write with NO X-API-Key is accepted by both engines.**
+  - spot: `POST /spot/accounts/transfers` answered `{"code":-1,"error":"insufficient balance"}`
+  - perps: `POST /perps/trade/orders` answered with body validation
+    (`NewOrderParams.AccountID required`)
+
+  Both are BUSINESS errors, reached only after the signature verified. A bad
+  signature on this venue is unmistakable and different:
+  `Invalid recovery ID: bad recovery id` (see section 3).
+- **All mainnet reads are unsigned and public**, same as testnet:
+  `/perps/accounts/{addr}/state`, `/perps/markets/symbols`,
+  `/perps/accounts/{addr}/orders` all return 200 with no auth.
+
+### The consequence for key hygiene, stated plainly
+
+There is no revocable sub-key on this venue. The master wallet that holds the
+funds is also the key that signs every write. We cannot invent a key model SoDEX
+does not implement, so the mitigation for mainnet is the balance (keep it
+symbolic) and the human-approval gate, NOT key separation. Any copy claiming a
+"master-revocable registered key" is wrong.
+
+### Mainnet market rules (probed 2026-07-17)
+
+86 perp symbols. `BTC-USD` is symbolID **1** (same as testnet), `minNotional`
+**$10**, `stepSize` 0.00001, `quantityPrecision` 5, **maxLeverage 40**. That
+leverage is why the mainnet window runs with lowered caps: against a symbolic
+balance, the default $500 per-order cap is not protective (a ~$470 order at 40x
+is roughly the whole deposit).
+
+Deposits land in the SPOT sub-account and the venue sweeps them to PERPS on its
+own; observed 2026-07-17, no `transferSpotToPerps` was needed.

@@ -36,12 +36,9 @@ import "./_env";
 process.env.SONAR_EXECUTION_MODE = "live-mainnet";
 process.env.SONAR_ALLOW_MAINNET = "true";
 process.env.SONAR_REQUIRE_MANUAL_APPROVAL = "true";
-// `||` not `??`: .env.local carries these as EMPTY strings, which ?? would keep
+// `||` not `??`: .env.local carries this as an EMPTY string, which ?? would keep
 // (only null/undefined trigger it) and which env.ts then normalizes to undefined,
 // tripping the mainnet boot guard.
-process.env.SODEX_API_KEY = process.env.SODEX_API_KEY || "smoke-key-name";
-process.env.SODEX_MAINNET_SIGNING_KEY =
-  process.env.SODEX_MAINNET_SIGNING_KEY || `0x${"1".repeat(64)}`;
 process.env.VALUECHAIN_USDC_ADDRESS =
   process.env.VALUECHAIN_USDC_ADDRESS || `0x${"2".repeat(40)}`;
 
