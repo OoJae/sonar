@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db, schema } from "@/lib/db/client";
 import { ThesisSchema, type Thesis } from "@/lib/agent/thesis";
 import {
@@ -38,12 +38,22 @@ const THESIS_SCAN_DEPTH = 20;
 async function loadLatestThesis(): Promise<Thesis | null> {
   try {
     const rows = await db()
-      .select()
+      .select({ payload: schema.theses.payload })
       .from(schema.theses)
+      // Exclude smoke-script theses. The synthetic fixture is schema-valid by
+      // construction, so a smoke run would otherwise become the newest thesis
+      // that parses and take over the public page. Filter on the run flag /log
+      // already uses, rather than trusting the payload.
+      .innerJoin(schema.agentRuns, eq(schema.theses.runId, schema.agentRuns.id))
       // The research note is the directional thesis; the delta-neutral strategy
-      // persists its own synthetic (schema-valid) theses moments later each
-      // rebalance cycle and must not shadow it here.
-      .where(eq(schema.theses.strategy, "directional"))
+      // persists its own (schema-valid) theses moments later each rebalance
+      // cycle and must not shadow it here.
+      .where(
+        and(
+          eq(schema.theses.strategy, "directional"),
+          eq(schema.agentRuns.synthetic, false),
+        ),
+      )
       .orderBy(desc(schema.theses.generatedAt))
       .limit(THESIS_SCAN_DEPTH);
     for (const row of rows) {

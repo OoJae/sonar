@@ -71,6 +71,9 @@ async function main() {
     startedAt: new Date(),
     finishedAt: new Date(),
     ok: true,
+    // A dev fixture, not an agent decision: keep it off /log, /track, /signals,
+    // and the public API, which all now filter on this flag.
+    synthetic: true,
   };
   await db().insert(schema.agentRuns).values(run);
 

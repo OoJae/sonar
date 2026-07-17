@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { desc } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { db, schema } from "@/lib/db/client";
 import { v1RateLimit, v1Json, v1Error } from "@/lib/api/v1";
 
@@ -31,6 +31,10 @@ export async function GET(request: Request) {
         payload: schema.theses.payload,
       })
       .from(schema.theses)
+      // Exclude smoke-script theses from the public API, same as /log and
+      // /track: they are marked synthetic on their run.
+      .innerJoin(schema.agentRuns, eq(schema.theses.runId, schema.agentRuns.id))
+      .where(eq(schema.agentRuns.synthetic, false))
       .orderBy(desc(schema.theses.generatedAt))
       .limit(limit);
 

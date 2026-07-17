@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db, schema } from "@/lib/db/client";
 import { ThesisSchema } from "@/lib/agent/thesis";
 import { v1RateLimit, v1Json, v1Error } from "@/lib/api/v1";
@@ -13,9 +13,22 @@ export async function GET(request: Request) {
   if (limited) return limited;
   try {
     const rows = await db()
-      .select()
+      .select({
+        runId: schema.theses.runId,
+        strategy: schema.theses.strategy,
+        status: schema.theses.status,
+        payload: schema.theses.payload,
+      })
       .from(schema.theses)
-      .where(eq(schema.theses.strategy, "directional"))
+      // Exclude smoke-script theses (marked synthetic on their run), which are
+      // schema-valid and would otherwise surface here as the latest research note.
+      .innerJoin(schema.agentRuns, eq(schema.theses.runId, schema.agentRuns.id))
+      .where(
+        and(
+          eq(schema.theses.strategy, "directional"),
+          eq(schema.agentRuns.synthetic, false),
+        ),
+      )
       .orderBy(desc(schema.theses.generatedAt))
       .limit(5);
     for (const row of rows) {

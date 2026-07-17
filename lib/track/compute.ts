@@ -16,7 +16,7 @@
 //   Both normalized to 100 at inception, so the gap is active rebalancing vs
 //   static hold. Honest framing: paper plus testnet during the buildathon.
 
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { db, schema } from "@/lib/db/client";
 
 type IndexKey = "MAG7" | "DEFI" | "MEME" | "USSI";
@@ -114,9 +114,19 @@ export async function computeTrackData(): Promise<TrackData> {
       payload: schema.theses.payload,
     })
     .from(schema.theses)
+    // Exclude smoke-script theses. They are schema-valid by construction, so
+    // without this join they govern the track reconstruction as if they were
+    // real agent decisions and inflate the trade count. Their runs are marked
+    // synthetic (the same flag /log filters on).
+    .innerJoin(schema.agentRuns, eq(schema.theses.runId, schema.agentRuns.id))
     // Directional book only: the delta-neutral strategy has its own thesis rows
     // (Wave 3) and must not become a governing thesis for this reconstruction.
-    .where(eq(schema.theses.strategy, "directional"))
+    .where(
+      and(
+        eq(schema.theses.strategy, "directional"),
+        eq(schema.agentRuns.synthetic, false),
+      ),
+    )
     .orderBy(asc(schema.theses.generatedAt));
 
   const theses: ThesisRow[] = thesisRows.map((t) => ({
