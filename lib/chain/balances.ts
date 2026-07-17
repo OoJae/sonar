@@ -142,8 +142,14 @@ export async function getAgentBalances(): Promise<AgentBalances> {
   let venuePerpsVusdc: string | null = null;
   try {
     const venue = await getVenueVusdc();
-    venueSpotVusdc = String(venue.spot);
-    venuePerpsVusdc = String(venue.perps);
+    // null (a failed read) stays null so /portfolio shows "unknown", not "$0".
+    venueSpotVusdc = venue.spot === null ? null : String(venue.spot);
+    venuePerpsVusdc = venue.perps === null ? null : String(venue.perps);
+    if (venue.spot === null || venue.perps === null) {
+      notes.push(
+        "SoDEX venue balance partially unavailable (read failed); shown as unknown, not zero.",
+      );
+    }
   } catch (err) {
     logger.warn("balances.venue_read_failed", {
       error: err instanceof Error ? err.message : String(err),

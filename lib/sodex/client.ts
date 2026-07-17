@@ -444,14 +444,19 @@ export async function getAccountId(kind: Kind = "perps"): Promise<number> {
 // Both reads are unsigned public account reads.
 // ---------------------------------------------------------------------------
 export async function getVenueVusdc(): Promise<{
-  spot: number;
-  perps: number;
+  spot: number | null;
+  perps: number | null;
 }> {
   const address = getSignerAddress();
 
-  let spot = 0;
+  // null means the read FAILED (unknown), which must be distinguishable from a
+  // genuine 0 balance: rendering an outage as "$0.00" tells an operator arming
+  // mainnet that their deposit did not land. A value is set to 0 only once the
+  // read itself succeeds, then overridden if a vUSDC row is present.
+  let spot: number | null = null;
   try {
     const spotState = await getAccountState({ kind: "spot" });
+    spot = 0; // read succeeded; 0 unless a vUSDC row says otherwise
     const balances = (spotState as Record<string, unknown>).B;
     if (Array.isArray(balances)) {
       const vusdc = balances.find(
@@ -469,13 +474,14 @@ export async function getVenueVusdc(): Promise<{
     });
   }
 
-  let perps = 0;
+  let perps: number | null = null;
   try {
     const res = await fetch(
       `${gateway("perps")}/accounts/${address}/balances`,
       { method: "GET", headers: { Accept: "application/json" }, cache: "no-store" },
     );
     if (res.ok) {
+      perps = 0; // read succeeded
       const json = (await res.json()) as {
         data?: { balances?: Array<{ coin?: string; total?: string | number }> };
       };
@@ -485,6 +491,7 @@ export async function getVenueVusdc(): Promise<{
         if (Number.isFinite(n)) perps = n;
       }
     }
+    // A non-ok response is a failed read: perps stays null, not 0.
   } catch (err) {
     logger.warn("sodex.venue_perps_read_failed", {
       error: err instanceof Error ? err.message : String(err),
