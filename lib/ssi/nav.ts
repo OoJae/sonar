@@ -20,7 +20,11 @@ import type { SsiIndexKey } from "./addresses";
 
 export type NavComputation = {
   index: SsiIndexKey;
-  navPerShareUSD: number;
+  // null means "could not be computed" (the chain read failed, or no underlying
+  // token priced), NOT zero. A NAV of exactly 0 is impossible for a live index,
+  // so returning 0 on an outage silently poisons anything that persists or
+  // charts it. Callers must handle null; persistNavSnapshots drops these rows.
+  navPerShareUSD: number | null;
   asOf: string;
   priced: number;        // count of tokens that produced a USD price
   skipped: number;       // count of tokens with no USD price
@@ -29,15 +33,23 @@ export type NavComputation = {
 
 export async function computeNav(index: SsiIndexKey): Promise<NavComputation> {
   const snapshot = await readIndexSnapshot(index);
+
+  const base = {
+    index,
+    asOf: snapshot.readAt,
+    totalSupply: snapshot.totalSupply,
+  };
+
   if (snapshot.tokenset.length === 0) {
-    // USSI is the stable reference and has no tokenset; NAV is $1 by definition.
+    // Two very different states look identical here: USSI legitimately has no
+    // tokenset (NAV is $1 by definition), and a FAILED getTokenset read also
+    // yields an empty tokenset. Branch on whether the read succeeded, not on the
+    // empty shape, or a transient RPC failure prices the index at $1.
     return {
-      index,
-      navPerShareUSD: 1,
-      asOf: snapshot.readAt,
+      ...base,
+      navPerShareUSD: snapshot.tokensetOk ? 1 : null,
       priced: 0,
       skipped: 0,
-      totalSupply: snapshot.totalSupply,
     };
   }
 
@@ -60,13 +72,13 @@ export async function computeNav(index: SsiIndexKey): Promise<NavComputation> {
     priced++;
   }
 
+  // Not a single token priced (e.g. a SoSoValue outage). The running sum is 0,
+  // but that is "unknown", not a $0 index. Mirror lib/proposals/price.ts.
   return {
-    index,
-    navPerShareUSD: nav,
-    asOf: snapshot.readAt,
+    ...base,
+    navPerShareUSD: priced === 0 ? null : nav,
     priced,
     skipped,
-    totalSupply: snapshot.totalSupply,
   };
 }
 

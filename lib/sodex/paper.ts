@@ -39,7 +39,9 @@ async function priceOf(market: string): Promise<number> {
   const ssiIndex = SSI_MARKETS[market];
   if (ssiIndex) {
     const nav = await computeNav(ssiIndex);
-    if (nav.navPerShareUSD > 0) return nav.navPerShareUSD;
+    if (nav.navPerShareUSD !== null && nav.navPerShareUSD > 0) {
+      return nav.navPerShareUSD;
+    }
   } else {
     const base = market.replace(/-(perp|usd)$/i, "");
     const px = await getPriceUSD(base);

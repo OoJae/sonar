@@ -425,9 +425,17 @@ async function fetchDataFreshness(
 
 async function persistNavSnapshots(): Promise<void> {
   const navs = await computeAllNavs();
-  if (navs.length === 0) return;
+  // Drop any index whose NAV could not be computed (chain read failed, or no
+  // underlying token priced). Persisting those as 0 is what poisoned /track: the
+  // buy-and-hold baseline read the 0 as a real value and published a crash that
+  // never happened. An outage now writes a shorter batch, never a false one.
+  const priced = navs.filter(
+    (n): n is typeof n & { navPerShareUSD: number } =>
+      n.navPerShareUSD !== null && n.navPerShareUSD > 0,
+  );
+  if (priced.length === 0) return;
   await db().insert(schema.navSnapshots).values(
-    navs.map((n) => ({
+    priced.map((n) => ({
       index: n.index,
       navPerShareUsd: String(n.navPerShareUSD),
       asOf: new Date(n.asOf),
@@ -474,7 +482,14 @@ async function executeAllocations(
   thesis: Thesis,
   deRiskFactor: number,
 ): Promise<void> {
-  const positions = await getPositions();
+  // Scope to the directional book. These SSI legs are placed under the default
+  // "directional" strategy, so reading ALL strategies let the delta-neutral
+  // book's MAG7.ssi row (correctly held near $500 by its own sizing) be matched
+  // by the .find below as this book's current MAG7 exposure. The rebalancer then
+  // read ~$500 as current against a ~$52k target and bought the difference every
+  // cycle, never converging (MAG7 reached 63% of book against a 45% target). It
+  // also contaminated the equity sum. delta-neutral.ts:102 already scopes its read.
+  const positions = await getPositions("directional");
   const equity = positions.reduce(
     (acc, p) =>
       acc + p.markPrice * p.quantity * (p.side === "long" ? 1 : -1),

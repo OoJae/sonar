@@ -201,31 +201,44 @@ export async function computeTrackData(): Promise<TrackData> {
   // book period return.
   const periodReturnByThesis = new Map<string, number>();
 
+  // Last good NAV per index, carried forward across batches. An index missing or
+  // non-positive in a batch (a data outage, or a partial persist) must NOT drop
+  // that index's contribution to zero for one curve while the other holds it
+  // flat: that asymmetry published a fabricated buy-and-hold crash on /track.
+  // Both curves hold flat on missing data by reading the carried-forward value.
+  const lastNav: Record<string, number> = {};
+  for (const i of RISK_INDICES) {
+    const n0 = first.nav[i];
+    if (n0 && n0 > 0) lastNav[i] = n0;
+  }
+
   for (let k = 1; k < batches.length; k++) {
     const prev = batches[k - 1]!;
     const cur = batches[k]!;
     const gov = governingThesis(prev.at);
     const w = gov?.weights ?? {};
 
-    // Book period return (rebalanced to governing weights).
     let periodReturn = 0;
-    for (const i of RISK_INDICES) {
-      const a = prev.nav[i];
-      const b = cur.nav[i];
-      if (a && a > 0 && b && b > 0) {
-        periodReturn += (w[i] ?? 0) * (b / a - 1);
-      }
-    }
-    bookIndex *= 1 + periodReturn;
-    if (gov) periodReturnByThesis.set(gov.id, periodReturn);
-
-    // Baseline value (buy-and-hold units, never rebalanced).
     let baselineValue = baseUssiValue;
     for (const i of RISK_INDICES) {
+      const prevNav = lastNav[i];
+      const raw = cur.nav[i];
+      // Hold flat when the current read is missing or non-positive: the ratio is
+      // 1 (no period return) and the baseline keeps the last good value.
+      const curNav = raw && raw > 0 ? raw : prevNav;
+
+      if (prevNav && prevNav > 0 && curNav && curNav > 0) {
+        periodReturn += (w[i] ?? 0) * (curNav / prevNav - 1);
+      }
       const units = baseUnits[i] ?? 0;
-      const navi = cur.nav[i];
-      if (navi) baselineValue += units * navi;
+      if (curNav && curNav > 0) baselineValue += units * curNav;
+
+      // Advance only on a real read, so a gap does not concentrate a move.
+      if (raw && raw > 0) lastNav[i] = raw;
     }
+
+    bookIndex *= 1 + periodReturn;
+    if (gov) periodReturnByThesis.set(gov.id, periodReturn);
 
     curve.push({
       at: cur.at.toISOString(),

@@ -49,6 +49,11 @@ export type IndexSnapshot = {
   // It is computed off-chain from `tokenset` x oracle prices in Wave 2.
   navUSD: number | null;
   tokenset: TokensetEntry[];
+  // Did the getTokenset multicall leg actually succeed? A failed read collapses
+  // to an empty tokenset here, which is structurally identical to USSI (which
+  // legitimately has none). computeNav needs this to avoid pricing a failed read
+  // of MAG7/DEFI/MEME as USSI's $1. See lib/ssi/nav.ts.
+  tokensetOk: boolean;
   readAt: string;
 };
 
@@ -99,16 +104,16 @@ export async function readIndexSnapshot(
       ? formatUnits(totalSupplyRes.result, decimals)
       : "0";
 
-  const tokenset: TokensetEntry[] =
-    tokensetRes && tokensetRes.status === "success"
-      ? (tokensetRes.result as readonly RawTokensetEntry[]).map((t) => ({
-          chain: t.chain,
-          symbol: t.symbol,
-          addr: t.addr,
-          decimals: Number(t.decimals),
-          amount: formatUnits(t.amount, Number(t.decimals)),
-        }))
-      : [];
+  const tokensetOk = Boolean(tokensetRes && tokensetRes.status === "success");
+  const tokenset: TokensetEntry[] = tokensetOk
+    ? (tokensetRes!.result as readonly RawTokensetEntry[]).map((t) => ({
+        chain: t.chain,
+        symbol: t.symbol,
+        addr: t.addr,
+        decimals: Number(t.decimals),
+        amount: formatUnits(t.amount, Number(t.decimals)),
+      }))
+    : [];
 
   const snapshot: IndexSnapshot = {
     index,
@@ -123,10 +128,16 @@ export async function readIndexSnapshot(
     totalSupply,
     navUSD: null,
     tokenset,
+    tokensetOk,
     readAt: new Date().toISOString(),
   };
 
-  await cacheSet(snapshotKey(index), snapshot, SNAPSHOT_TTL_SEC);
+  // Never cache a failed read: a 5-minute TTL on a transient RPC failure would
+  // freeze the wrong answer for every consumer, including the NAV that feeds
+  // /track. Let the next call retry the chain.
+  if (tokensetOk) {
+    await cacheSet(snapshotKey(index), snapshot, SNAPSHOT_TTL_SEC);
+  }
   return snapshot;
 }
 

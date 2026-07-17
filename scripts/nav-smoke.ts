@@ -30,8 +30,10 @@ async function main() {
   console.log("  Index  | NAV       | priced | skipped | totalSupply");
   console.log("  -------+-----------+--------+---------+-------------");
   for (const r of results) {
+    const nav =
+      r.navPerShareUSD === null ? "  unknown" : `$${r.navPerShareUSD.toFixed(4)}`;
     console.log(
-      `  ${r.index.padEnd(6)} | $${r.navPerShareUSD.toFixed(4).padStart(9)} | ${String(r.priced).padStart(6)} | ${String(r.skipped).padStart(7)} | ${r.totalSupply}`,
+      `  ${r.index.padEnd(6)} | ${nav.padStart(9)} | ${String(r.priced).padStart(6)} | ${String(r.skipped).padStart(7)} | ${r.totalSupply}`,
     );
   }
 }
