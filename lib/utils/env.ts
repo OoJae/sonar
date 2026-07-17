@@ -1,4 +1,11 @@
 import { z } from "zod";
+import {
+  VALUECHAIN_MAINNET_USDC,
+  VALUECHAIN_TESTNET_USDC,
+  VALUECHAIN_MAINNET_RPC,
+  isMainnetRpc,
+  sameAddressLoose,
+} from "@/lib/chain/valuechain";
 
 const EnvShape = z.object({
   NODE_ENV: z
@@ -53,6 +60,12 @@ const EnvShape = z.object({
     .enum(["true", "false"])
     .optional()
     .transform((v) => v === "true"),
+  // Comma-separated 0x addresses permitted to flip the execution mode from the
+  // browser (POST /api/admin/mode). Server-only and deliberately NOT
+  // NEXT_PUBLIC_: the list must never reach the bundle. A visitor can only ever
+  // learn "am I an admin" by producing a valid signature from the address being
+  // probed, so the list cannot be enumerated. Unset means the toggle is closed.
+  SONAR_ADMIN_ADDRESSES: z.string().optional(),
   SONAR_REQUIRE_MANUAL_APPROVAL: z
     .enum(["true", "false"])
     .default("false")
@@ -259,13 +272,47 @@ const EnvSchema = EnvShape.superRefine((cfg, ctx) => {
     // so SODEX_WALLET_PRIVATE_KEY (already required for any live mode above) is
     // the only credential. See the header of lib/sodex/client.ts.
     //
-    // The margin asset must be known before any real funds are deposited.
-    if (!cfg.VALUECHAIN_USDC_ADDRESS) {
+    // The margin asset and RPC are asserted BY VALUE, not by presence. A presence
+    // check is worthless here: .env.local always supplies a USDC address (the
+    // testnet one), so `if (!cfg.VALUECHAIN_USDC_ADDRESS)` could never fire and a
+    // config that set the mode but not the margin asset would boot straight into
+    // mainnet holding a testnet address. Probed 2026-07-17: each USDC address is
+    // dead code on the other chain, so that mismatch reads as a silent zero
+    // balance, never as an error. The value check is the only thing that catches
+    // it. See lib/chain/valuechain.ts for the probe log.
+    if (!sameAddressLoose(cfg.VALUECHAIN_USDC_ADDRESS, VALUECHAIN_MAINNET_USDC)) {
       ctx.addIssue({
         code: "custom",
         path: ["VALUECHAIN_USDC_ADDRESS"],
-        message:
-          "VALUECHAIN_USDC_ADDRESS (ValueChain mainnet USDC) is required on live-mainnet; it is the margin asset",
+        message: `VALUECHAIN_USDC_ADDRESS must be the ValueChain MAINNET USDC (${VALUECHAIN_MAINNET_USDC}) on live-mainnet; got ${cfg.VALUECHAIN_USDC_ADDRESS ?? "unset"}. It is the margin asset.`,
+      });
+    }
+    if (!isMainnetRpc(cfg.VALUECHAIN_RPC_URL)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["VALUECHAIN_RPC_URL"],
+        message: `VALUECHAIN_RPC_URL must be a ValueChain mainnet RPC (e.g. ${VALUECHAIN_MAINNET_RPC}, chainId 286623) on live-mainnet; got ${cfg.VALUECHAIN_RPC_URL ?? "unset"}.`,
+      });
+    }
+  }
+
+  // The symmetric assertion. Without it, a half-removed mainnet config (mode
+  // reverted to testnet but the mainnet USDC/RPC left behind) would boot as
+  // "testnet" while reading mainnet contracts, which is the same silent-zero
+  // failure pointed the other way.
+  if (cfg.SONAR_EXECUTION_MODE !== "live-mainnet") {
+    if (sameAddressLoose(cfg.VALUECHAIN_USDC_ADDRESS, VALUECHAIN_MAINNET_USDC)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["VALUECHAIN_USDC_ADDRESS"],
+        message: `VALUECHAIN_USDC_ADDRESS is the MAINNET USDC but SONAR_EXECUTION_MODE=${cfg.SONAR_EXECUTION_MODE}. Off mainnet it must be the testnet USDC (${VALUECHAIN_TESTNET_USDC}).`,
+      });
+    }
+    if (isMainnetRpc(cfg.VALUECHAIN_RPC_URL)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["VALUECHAIN_RPC_URL"],
+        message: `VALUECHAIN_RPC_URL is a mainnet RPC but SONAR_EXECUTION_MODE=${cfg.SONAR_EXECUTION_MODE}. Off mainnet it must point at ValueChain testnet (chainId 138565).`,
       });
     }
   }
@@ -275,15 +322,41 @@ export type Env = z.infer<typeof EnvSchema>;
 
 let cached: Env | null = null;
 
-function normalizeProcessEnv() {
-  // Empty string in a .env file ("FOO=") round-trips as "" in process.env.
-  // For optional fields (.min(1).optional()) that would fail validation.
-  // Treat empty and whitespace-only strings as absent.
+// Empty string in a .env file ("FOO=") round-trips as "" in process.env.
+// For optional fields (.min(1).optional()) that would fail validation.
+// Treat empty and whitespace-only strings as absent.
+function normalizeRecord(rec: Record<string, string | undefined>) {
   const out: Record<string, string | undefined> = {};
-  for (const [k, v] of Object.entries(process.env)) {
+  for (const [k, v] of Object.entries(rec)) {
     out[k] = typeof v === "string" && v.trim() === "" ? undefined : v;
   }
   return out;
+}
+
+function normalizeProcessEnv() {
+  return normalizeRecord(process.env as Record<string, string | undefined>);
+}
+
+/**
+ * Validate a PROSPECTIVE environment without touching the cache.
+ *
+ * This is the preflight for the mode toggle: POST /api/admin/mode builds the env
+ * as it would be after its drop-in lands and runs it through the real schema
+ * BEFORE writing anything. That ordering is the whole safety property, because
+ * an invalid env is not a boot failure here. There is no module-scope env() call
+ * outside instrumentation.ts, so `next start` would bind the port, look healthy
+ * to systemd, and 500 every request forever. Never write a config that cannot
+ * boot; do not rely on finding out afterwards.
+ */
+export function validateEnvCandidate(
+  raw: Record<string, string | undefined>,
+): { ok: true } | { ok: false; issues: string[] } {
+  const parsed = EnvSchema.safeParse(normalizeRecord(raw));
+  if (parsed.success) return { ok: true };
+  return {
+    ok: false,
+    issues: parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`),
+  };
 }
 
 export function env(): Env {
@@ -299,15 +372,30 @@ export function env(): Env {
   return cached;
 }
 
+// The operator-facing report behind `pnpm verify:env`, which is the tool you
+// reach for when the app will not boot. It had two bugs, and both mattered
+// precisely then:
+//
+//  1. It parsed the RAW process.env while env() parses normalizeProcessEnv().
+//     .env.local carries 7 empty-string vars, systemd injects them as "", and an
+//     empty string fails .url()/.regex() (a .default() only fills undefined). So
+//     the parse always failed and the report disagreed with the running app.
+//  2. `valid: parsed.success` stamped ONE global boolean onto every row, so a
+//     single bad key reported all 52 as invalid and pointed at nothing.
+//
+// Now: normalize like env() does, and attribute each issue to its own key.
 export function envReport() {
-  const parsed = EnvSchema.safeParse(process.env);
+  const parsed = EnvSchema.safeParse(normalizeProcessEnv());
+  const failed = new Set<string>(
+    parsed.success ? [] : parsed.error.issues.map((i) => String(i.path[0] ?? "")),
+  );
   const keys = Object.keys(EnvShape.shape) as (keyof Env)[];
   return keys.map((key) => {
     const raw = process.env[key as string];
     return {
       key,
       present: raw !== undefined && raw !== "",
-      valid: parsed.success,
+      valid: !failed.has(String(key)),
     };
   });
 }

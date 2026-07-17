@@ -9,6 +9,15 @@ Type=simple
 User=root
 WorkingDirectory=/root/sonar
 EnvironmentFile=/root/sonar/.env.local
+# Optional mode drop-in, written by POST /api/admin/mode to arm live-mainnet.
+# MUST stay AFTER .env.local: systemd reads EnvironmentFile directives in order
+# and the later assignment wins. The "-" makes a missing file a non-error, which
+# is what makes the kill switch `rm /root/sonar/.env.mode && systemctl restart
+# sonar`: no file means the process boots on the .env.local baseline (testnet).
+# No ExecStartPre validator here on purpose: systemd reads EnvironmentFile BEFORE
+# ExecStartPre runs, so a drop-in removed there would not change ExecStart's env
+# in the same start attempt. instrumentation.ts is where a bad drop-in is caught.
+EnvironmentFile=-/root/sonar/.env.mode
 # PORT must match the upstream nginx proxy_pass (127.0.0.1:3005). Restart
 # semantics: always restart with a short backoff so a single crash does not
 # leave the public URL dead during judging week.
