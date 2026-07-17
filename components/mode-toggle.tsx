@@ -19,7 +19,8 @@
 // because wagmi's state is client-only and rendering it during SSR mismatches.
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { useAccount, useSignTypedData } from "wagmi";
+import { useAccount, useSignTypedData, useSwitchChain } from "wagmi";
+import { base } from "wagmi/chains";
 import { Badge } from "@/components/ui/badge";
 import {
   buildModeActionTypedData,
@@ -104,6 +105,7 @@ export function ModeToggle({ initialMode }: { initialMode: string }) {
   const [confirmText, setConfirmText] = useState("");
   const { address, isConnected } = useAccount();
   const { signTypedDataAsync } = useSignTypedData();
+  const { switchChainAsync } = useSwitchChain();
   const cancelled = useRef(false);
 
   // Stop the restart poll if the operator navigates away mid-flip.
@@ -134,6 +136,15 @@ export function ModeToggle({ initialMode }: { initialMode: string }) {
       };
 
       const before = await fetchStatus();
+      // Sign on Base so the wallet's active chain matches the EIP-712 domain
+      // chainId (8453); some wallets warn or refuse on a mismatch. Same pattern
+      // as delegation-panel. The signature is chain-agnostic, so a failed switch
+      // is non-fatal.
+      try {
+        await switchChainAsync({ chainId: base.id });
+      } catch {
+        // wallet may not support programmatic switch; the signature is still valid
+      }
       const signature = await signTypedDataAsync(buildModeActionTypedData(action));
 
       setPhase("posting");
@@ -191,7 +202,7 @@ export function ModeToggle({ initialMode }: { initialMode: string }) {
       const m = err instanceof Error ? err.message : String(err);
       setMsg(m.toLowerCase().includes("rejected") ? "Signature rejected." : m);
     }
-  }, [address, target, signTypedDataAsync]);
+  }, [address, target, signTypedDataAsync, switchChainAsync]);
 
   const badge = (
     <Badge

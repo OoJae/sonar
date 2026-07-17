@@ -251,10 +251,23 @@ export async function POST(request: Request) {
     return bad("dropin_state_mismatch", 500, { expectedArmed: b.mode === "live-mainnet", armed });
   }
 
-  await db()
-    .update(schema.adminActions)
-    .set({ appliedAt: new Date() })
-    .where(eq(schema.adminActions.id, rowId));
+  // Past this line the drop-in state on disk is authoritative and the ONLY safe
+  // resolution is to restart so the process boots into the intended mode. The
+  // appliedAt write is audit metadata, so a DB failure here must NOT abort before
+  // the exit: doing so would leave an armed drop-in on disk with the process
+  // still running the old mode, and the next unrelated restart would arm mainnet
+  // silently. Best-effort, then exit regardless.
+  try {
+    await db()
+      .update(schema.adminActions)
+      .set({ appliedAt: new Date() })
+      .where(eq(schema.adminActions.id, rowId));
+  } catch (err) {
+    logger.error("admin.mode.applied_write_failed", {
+      rowId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 
   logger.warn("admin.mode.flip", {
     from: current,

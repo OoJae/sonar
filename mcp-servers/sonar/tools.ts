@@ -1,9 +1,15 @@
 // Shared tool definitions for the Sonar MCP surface.
 //
-// Every handler fetches the PUBLIC read-only API v1 (no DB access, no secrets),
-// so the same definitions power both the stdio server (runnable anywhere) and
-// the hosted Streamable HTTP endpoint at /api/mcp. Point SONAR_API_BASE at a
-// different deployment to consume it.
+// The handlers resolve a v1 PATH to a JSON string. Two resolvers exist:
+//   - the default HTTP resolver, for the stdio server (runnable anywhere, no DB).
+//   - an in-process resolver the hosted /api/mcp route installs via
+//     setV1Resolver, which calls lib/api/v1-data directly.
+//
+// The hosted route MUST use the in-process resolver: fetching Sonar's own public
+// API over HTTP made every hosted-MCP call worldwide egress from the server's one
+// IP and share a single per-IP v1 rate-limit bucket, so one client could deny the
+// whole MCP surface. Point SONAR_API_BASE at a different deployment for the
+// HTTP resolver.
 
 import { z } from "zod";
 
@@ -13,7 +19,10 @@ function apiBase(): string {
   return (process.env.SONAR_API_BASE ?? DEFAULT_BASE).replace(/\/$/, "");
 }
 
-async function fetchV1(path: string): Promise<string> {
+// A resolver returns the JSON string of a v1 endpoint's `data` (or {error}).
+export type V1Resolver = (path: string) => Promise<string>;
+
+async function httpResolver(path: string): Promise<string> {
   const res = await fetch(`${apiBase()}${path}`, {
     headers: { Accept: "application/json" },
     signal: AbortSignal.timeout(15_000),
@@ -27,6 +36,17 @@ async function fetchV1(path: string): Promise<string> {
     return JSON.stringify({ error: body?.error ?? `http_${res.status}` });
   }
   return JSON.stringify(body.data);
+}
+
+let resolver: V1Resolver = httpResolver;
+
+/** Install an alternate resolver (the hosted route injects an in-process one). */
+export function setV1Resolver(r: V1Resolver): void {
+  resolver = r;
+}
+
+function fetchV1(path: string): Promise<string> {
+  return resolver(path);
 }
 
 type ToolResult = { content: Array<{ type: "text"; text: string }> };
