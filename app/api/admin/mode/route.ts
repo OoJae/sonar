@@ -19,7 +19,7 @@
 
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { and, eq, gt } from "drizzle-orm";
+import { and, eq, gt, inArray, or } from "drizzle-orm";
 import { db, schema } from "@/lib/db/client";
 import { env, validateEnvCandidate } from "@/lib/utils/env";
 import { allowRequest, parseRateLimit } from "@/lib/utils/ratelimit";
@@ -181,19 +181,32 @@ export async function POST(request: Request) {
   if (b.mode !== "live-mainnet") {
     const ttlMin = e.SONAR_APPROVAL_TTL_MINUTES;
     const cutoff = new Date(Date.now() - ttlMin * 60_000);
-    const pending = await db()
-      .select({ id: schema.orders.id })
+    // Any NON-TERMINAL mainnet order blocks a disarm, not just pending_approval.
+    // A row leaves pending_approval the instant approval begins: the claim moves
+    // it to `pending`, submitAndFinalize sets `submitted`, then polls up to 30s.
+    // process.exit(0) here would truncate that poll and strand a live wire-side
+    // position off-book. `submitted`/`pending` rows carry real exposure and must
+    // block the disarm too. (TTL still bounds pending_approval; submitted/pending
+    // are in-flight regardless of age, so they are not TTL-scoped.)
+    const blocking = await db()
+      .select({ id: schema.orders.id, status: schema.orders.status })
       .from(schema.orders)
       .where(
         and(
-          eq(schema.orders.status, "pending_approval"),
-          gt(schema.orders.createdAt, cutoff),
+          eq(schema.orders.mode, "live-mainnet"),
+          or(
+            inArray(schema.orders.status, ["pending", "submitted"]),
+            and(
+              eq(schema.orders.status, "pending_approval"),
+              gt(schema.orders.createdAt, cutoff),
+            ),
+          ),
         ),
       );
-    if (pending.length > 0) {
+    if (blocking.length > 0) {
       return bad("pending_orders", 409, {
-        count: pending.length,
-        hint: `approve or wait out the ${ttlMin}m approval TTL before disarming`,
+        count: blocking.length,
+        hint: `mainnet orders are in flight or awaiting approval; resolve them before disarming`,
       });
     }
   }
@@ -260,13 +273,49 @@ export async function POST(request: Request) {
     actor: recovered,
     restartExpected: true,
   });
-  scheduleExit();
+  // On a disarm, re-check for in-flight mainnet orders immediately before the
+  // exit, not only at step 10. An approve could have started in the ~750ms
+  // window; exiting then would truncate its submit poll and strand a live
+  // position off-book.
+  scheduleExit(b.mode !== "live-mainnet");
   return res;
 }
 
-function scheduleExit(): void {
+function scheduleExit(recheckInFlight: boolean): void {
   setTimeout(() => {
-    console.warn("[admin.mode] exiting so systemd restarts with the new mode");
-    process.exit(0);
+    void (async () => {
+      if (recheckInFlight) {
+        try {
+          const inFlight = await db()
+            .select({ id: schema.orders.id })
+            .from(schema.orders)
+            .where(
+              and(
+                eq(schema.orders.mode, "live-mainnet"),
+                inArray(schema.orders.status, ["pending", "submitted"]),
+              ),
+            );
+          if (inFlight.length > 0) {
+            // Abort the exit. The drop-in is already removed, so the NEXT restart
+            // disarms to testnet; meanwhile the process stays on mainnet, which
+            // MATCHES the in-flight order's venue, so it can finalize normally.
+            // The operator retries the disarm once it settles.
+            console.warn(
+              `[admin.mode] aborting exit: ${inFlight.length} mainnet order(s) in flight. ` +
+                `Process stays on mainnet to finalize them; retry the disarm after.`,
+            );
+            return;
+          }
+        } catch (err) {
+          // If the re-check itself fails, do NOT exit blindly during a disarm.
+          console.warn(
+            `[admin.mode] in-flight re-check failed (${err instanceof Error ? err.message : String(err)}); not exiting`,
+          );
+          return;
+        }
+      }
+      console.warn("[admin.mode] exiting so systemd restarts with the new mode");
+      process.exit(0);
+    })();
   }, EXIT_DELAY_MS).unref();
 }

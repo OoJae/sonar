@@ -26,7 +26,7 @@
 //   8. Return an ExecutedTrade.
 
 import { randomUUID } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { keccak256, stringToBytes } from "viem";
 import { db, schema } from "@/lib/db/client";
 import { env } from "@/lib/utils/env";
@@ -111,13 +111,20 @@ function clientOrderId(
   strategy: string,
   thesisId: string,
   market: string,
+  side: string,
 ): string {
   // Deterministic 24-char alphanumeric+dash key. SoDEX testnet rejects the
   // bare keccak hex ("0x..." format) with `code: -1, error: clOrdID is
   // invalid`, so we hash and then format as `sonar-<16 lowercase hex>`. This
-  // stays deterministic per (thesisId, market), matches common exchange
+  // stays deterministic per (thesisId, market, side), matches common exchange
   // clOrdID conventions, and stays well under any reasonable length cap.
-  const hash = keccak256(stringToBytes(`${strategy}:${thesisId}:${market}`));
+  //
+  // `side` is in the key so a thesis carrying two legs on the same market but
+  // opposite sides (a long and a short hedge on BTC-PERP) does not collapse both
+  // onto one key and lose the second to the UNIQUE constraint. Same market AND
+  // same side still collapses, which is the correct idempotent behavior for a
+  // retried leg.
+  const hash = keccak256(stringToBytes(`${strategy}:${thesisId}:${market}:${side}`));
   return `sonar-${hash.slice(2, 18)}`;
 }
 
@@ -157,7 +164,7 @@ export async function recordPendingMainnetOrder(
     );
   }
 
-  const clOrdID = clientOrderId(req.strategy, req.thesisId, req.market);
+  const clOrdID = clientOrderId(req.strategy, req.thesisId, req.market, req.side);
 
   // Strict attribution. resolveRunIdForCap falls back to thesisId when no run
   // row exists, but orders.runId is a notNull FK to agent_runs.id, so that
@@ -466,6 +473,24 @@ export async function reconcileOrder(orderRowId: string): Promise<ReconcileResul
   const row = rows[0];
   if (!row) throw new Error(`Order ${orderRowId} not found.`);
 
+  // Bind to the venue the row was queued for, exactly as submitApprovedOrder does
+  // (:346). Every venue read below (findOrderByClOrdID, pollUntilTerminal) uses
+  // the gateway chosen by the CURRENT process mode. Without this, reconciling a
+  // mainnet order while the process is on testnet queries the testnet venue,
+  // finds nothing, and takes the "venue never received it" branch, which resets
+  // the row to pending_approval, re-arming an order that may have really filled
+  // on mainnet for a SECOND real fill (the venue does not dedupe clOrdID). A null
+  // row.mode is refused here, not passed: an unattributable venue is not safe to
+  // read against and decide on.
+  const mode = env().SONAR_EXECUTION_MODE;
+  if (row.mode !== mode) {
+    return {
+      outcome: "nothing_to_do",
+      status: row.status,
+      detail: `row was queued under mode "${row.mode ?? "unset"}" but the process is "${mode}"; refusing to reconcile against the wrong venue`,
+    };
+  }
+
   const resolution = resolveMarket(row.market);
   if (!resolution.tradeable || resolution.kind !== "perp") {
     return { outcome: "nothing_to_do", status: row.status, detail: "not a perp order" };
@@ -571,7 +596,7 @@ export async function placeOrder(
     );
   }
 
-  const clOrdID = clientOrderId(req.strategy, req.thesisId, req.market);
+  const clOrdID = clientOrderId(req.strategy, req.thesisId, req.market, req.side);
   const runId = await resolveRunIdForCap(req.thesisId);
 
   // Idempotency: if this leg was already attempted, resume from the existing
@@ -1050,7 +1075,13 @@ async function finalizeOrder(
       `SoDEX order ${clOrdID} reported a fill with no usable price/quantity; left submitted for reconciliation.`,
     );
   }
-  await db()
+  // Claim the row: only the transition out of a non-terminal state may book the
+  // fill. reconcile and approve can both reach finalizeOrder for the same order
+  // (a poll-timeout reconcile racing the approve that placed it), and neither
+  // path holds a lock. Without this conditional claim, both would insert a
+  // paper_trades row and upsert the position twice, double-booking one real fill.
+  // The UNIQUE clientOrderId protects the venue submit; this protects the finalize.
+  const claimed = await db()
     .update(schema.orders)
     .set({
       status: dbStatus,
@@ -1060,7 +1091,34 @@ async function finalizeOrder(
       txRef: outcome.sodexOrderId,
       filledAt,
     })
-    .where(eq(schema.orders.id, orderRowId));
+    .where(
+      and(
+        eq(schema.orders.id, orderRowId),
+        inArray(schema.orders.status, ["submitted", "pending"]),
+      ),
+    )
+    .returning({ id: schema.orders.id });
+
+  if (claimed.length === 0) {
+    // A concurrent finalize already booked this fill. Do not insert a second
+    // paper_trades row or upsert the position again. Return the fill as-is.
+    logger.info("finalize.already_booked", { orderId: orderRowId, clOrdID });
+    return {
+      id: orderRowId,
+      thesisId: req.thesisId,
+      strategy: req.strategy,
+      market: symbolName,
+      side: req.side,
+      kind: "perp",
+      type: req.type,
+      notionalUSD: req.notionalUSD,
+      fillPrice,
+      fillQuantity,
+      slippageBps: req.slippageBps,
+      feeUSD: 0,
+      executedAt: filledAt.toISOString(),
+    };
+  }
 
   // Insert a paper_trades row so the Wave 1 position upsert logic (paper.ts)
   // keeps maintaining paper_positions correctly. Real fills coexist with paper

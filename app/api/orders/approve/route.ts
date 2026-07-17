@@ -4,6 +4,7 @@ import { db, schema } from "@/lib/db/client";
 import { env } from "@/lib/utils/env";
 import { logger } from "@/lib/utils/logger";
 import { submitApprovedOrder } from "@/lib/sodex/live";
+import { isCycleInFlight } from "@/lib/agent/runner";
 import { acquireRunLock, releaseRunLock } from "@/lib/utils/ratelimit";
 
 export const runtime = "nodejs";
@@ -46,16 +47,19 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
-  const orderId =
+  const orderIdRaw =
     typeof body === "object" && body !== null
       ? (body as Record<string, unknown>).orderId
       : undefined;
-  if (typeof orderId !== "string" || orderId.length === 0) {
+  if (typeof orderIdRaw !== "string" || orderIdRaw.length === 0) {
     return NextResponse.json(
       { error: "missing_order_id", message: "Body must be {\"orderId\": \"<uuid>\"}." },
       { status: 400 },
     );
   }
+  // Narrowed to string; a const so the handBackClaim closure below keeps the type
+  // (control-flow narrowing does not cross a nested-function boundary).
+  const orderId: string = orderIdRaw;
 
   const approvedBy = request.headers.get("x-approved-by")?.slice(0, 120) ?? "operator";
 
@@ -111,20 +115,41 @@ export async function POST(request: Request) {
   // Serialize against the agent cycle. submitApprovedOrder reaches
   // upsertPositionFromLiveFill, a read/modify/write on paper_positions with no
   // row lock, and the cron's markToMarket writes the same rows; approving mid
-  // cycle would lose an update. runAgentCycle's own mutex does not cover us
-  // because we never call it.
-  const locked = await acquireRunLock(120);
-  if (!locked) {
-    // Hand the claim back so the operator can retry once the cycle finishes.
+  // cycle would lose an update.
+  //
+  // acquireRunLock alone does NOT cover the cron cycle: runAgentCycle takes no
+  // lock (it guards itself with the module-level cycleInFlight mutex), so the
+  // lock only serialized this route against demo-run and proposals, never the
+  // one writer that matters. Check that mutex directly first. acquireRunLock is
+  // kept below for approve-vs-approve and approve-vs-demo exclusion.
+  async function handBackClaim() {
     await db()
       .update(schema.orders)
       .set({ status: "pending_approval", approvedAt: null, approvedBy: null })
       .where(eq(schema.orders.id, orderId));
+  }
+
+  if (isCycleInFlight()) {
+    await handBackClaim();
     return NextResponse.json(
       {
         ok: false,
         error: "busy",
         message: "An agent cycle is in flight; the claim was released. Retry shortly.",
+      },
+      { status: 409 },
+    );
+  }
+
+  const locked = await acquireRunLock(120);
+  if (!locked) {
+    // Hand the claim back so the operator can retry once the other flow finishes.
+    await handBackClaim();
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "busy",
+        message: "Another operation holds the run lock; the claim was released. Retry shortly.",
       },
       { status: 409 },
     );

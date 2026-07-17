@@ -194,29 +194,68 @@ export async function runDeltaNeutral(
 
   await persistThesis(runId, parsed.data, STRATEGY);
 
-  for (const leg of legs) {
+  // Place the risk-gated hedge FIRST, then the long, and never ADD long exposure
+  // that the hedge did not actually cover. The long is a spot SSI leg (routes to
+  // paper, always fills); the short is a perp that passes through the risk gate
+  // and can be downsized or rejected. Placing the long first meant a rejected
+  // hedge published a "delta-neutral" book that was 100% net long with no
+  // rollback and no self-heal (the next cycle sees the long in place and
+  // re-queues only the hedge, forever). On mainnet the whole strategy is skipped
+  // above, so this runs on testnet where legs fill or are rejected inline.
+  const hedgeLeg = legs.find((l) => l.market === SHORT_MARKET);
+  const longLeg = legs.find((l) => l.market === LONG_MARKET);
+
+  const logLegError = (market: string, err: unknown) => {
+    if (err instanceof PendingApprovalError) {
+      logger.info("delta_neutral.leg_pending_approval", { market, orderId: err.orderId });
+    } else {
+      logger.warn("delta_neutral.leg_skipped", {
+        market,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+
+  // Did the hedge reach (close to) its target? If there is no hedge leg this
+  // cycle, the BTC beta is already at target, so an added long is covered.
+  let hedgeCovered = true;
+  if (hedgeLeg) {
     try {
-      await placeOrder(leg);
+      const filled = await placeOrder(hedgeLeg);
+      const filledUsd = filled.fillPrice * filled.fillQuantity;
+      // The gate may downsize; treat anything materially short of target as
+      // "not covered" so we do not add a long against a partial hedge.
+      hedgeCovered = filledUsd >= Math.abs(shortDelta) * 0.95;
     } catch (err) {
-      // Unreachable on mainnet (the strategy skips entirely up top), but branch
-      // anyway so a queued leg can never be mislabelled as a skipped one.
-      if (err instanceof PendingApprovalError) {
-        logger.info("delta_neutral.leg_pending_approval", {
-          market: leg.market,
-          orderId: err.orderId,
-        });
-      } else {
-        logger.warn("delta_neutral.leg_skipped", {
-          market: leg.market,
-          error: err instanceof Error ? err.message : String(err),
-        });
+      hedgeCovered = false;
+      logLegError(hedgeLeg.market, err);
+    }
+  }
+
+  if (longLeg) {
+    const longAddsExposure = longLeg.side === "buy";
+    if (longAddsExposure && !hedgeCovered) {
+      // Adding long here is exactly the 100%-net-long failure. Leave the long
+      // where it is; the next cycle retries the hedge and only then the long.
+      logger.warn("delta_neutral.long_skipped_hedge_incomplete", {
+        runId,
+        market: longLeg.market,
+        shortDelta,
+      });
+    } else {
+      try {
+        await placeOrder(longLeg);
+      } catch (err) {
+        logLegError(longLeg.market, err);
       }
     }
   }
+
   logger.info("delta_neutral.executed", {
     runId,
     longDelta,
     shortDelta,
     btcWeight,
+    hedgeCovered,
   });
 }
