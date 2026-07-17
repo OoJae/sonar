@@ -237,15 +237,56 @@ lists the position caps and the approval gate.
   in a forced test at a temporarily lowered 2% cap; at the shipped 25% it never
   has (max drawdown since inception 13.3%).
 
-### One-fill mainnet verification
+### One-fill mainnet verification (DONE 2026-07-17)
 
-<!-- PHASE 6 EVIDENCE SLOT: do not fill this in until the fill actually happens.
-     It should record: the registered key name, the order id, the fill price and
-     quantity, the sodexOrderId, and the close. If it is empty, the fill has not
-     happened. -->
+The gated mainnet path was exercised once against the live SoDEX venue, with a
+human approving each order. Symbolic capital, minutes of exposure, then straight
+back to testnet.
 
-Pending. The gated mainnet path has not yet been exercised against the live
-venue.
+**The receipt.**
+
+| | open | close |
+|---|---|---|
+| order id | `37e9b9a5-2d45-450b-b084-1deba4fee09a` | `40be51ef-5e55-4027-b98d-f7bfb71b8793` |
+| side | BTC-PERP buy | BTC-PERP sell (reduce-only) |
+| fill | **$62,802** x **0.00017 BTC** | **$62,790** x **0.00017 BTC** |
+| sodexOrderId | `12038402194` | filled, position closed |
+| approvedBy | `OoJae via Claude` | `OoJae via Claude` |
+| thesis | `3ef25438` | `450697ba` |
+
+Account: `0x2b61FbdefEf22aBCc39645732a19842885f37F1c`, mainnet aid `223065`.
+Balance $11.988314 before, $11.977733 after: a **1.06 cent** round trip. The venue
+independently confirmed the position while open (entry $62,802, unrealized
+-$0.00119) and zero open positions after. Mode returned to `live-testnet`
+immediately; the caps were lowered to $15/$30 for the window and restored after.
+
+**What the gate actually did.** The cycle recorded `pending_approval` with
+`sodexOrderId=null` and the venue reporting zero positions and zero open orders:
+the order provably did not reach the wire until a human called
+`POST /api/orders/approve` with a bearer token. The row then walked
+`pending_approval -> pending -> submitted -> filled`, and `finalizeOrder` wrote
+the `paper_trades` and `paper_positions` rows, so /portfolio and /track saw it
+through the same path every testnet fill uses.
+
+**Two things this run proved that reading could not.**
+
+1. **`docs/sodex-live.md` section 13 was false.** It claimed mainnet needed an
+   `addAPIKey` ceremony with a separate registered keypair and `X-API-Key`. There
+   is no such endpoint (404), and a master-signed write with no `X-API-Key` is
+   accepted by both mainnet engines. Mainnet differs from testnet in exactly two
+   things: the gateway host and the EIP-712 chainId. The registered-key code was
+   removed rather than kept for a model the venue does not implement. The honest
+   consequence: there is no revocable sub-key here, so the wallet that signs also
+   holds the funds, and the mitigations are the symbolic balance and the approval
+   gate, not key hygiene.
+2. **The `reduceOnly` fix earned its place.** Without it (as the code stood before
+   this wave) the engine margins a close as new exposure and can refuse it. The
+   close above is a reduce-only order and it went through cleanly.
+
+Also observed: deposits land in the SPOT sub-account and the venue sweeps them to
+PERPS by itself, so no `transferSpotToPerps` was needed. Mainnet BTC-USD carries
+**maxLeverage 40**, which is why the window ran with lowered caps: against a
+symbolic balance the normal $500 per-order cap is not protective.
 
 ### Carried forward from Wave 2 (recorded at the time)
 

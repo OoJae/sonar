@@ -157,11 +157,14 @@ export default function AboutPage() {
             accounting of what those weights would do.
           </p>
           <p>
-            The gated mainnet path is implemented and smoke-tested, and it has
-            never touched the live venue: no mainnet key is registered and no
-            mainnet order has been placed. On-chain grant enforcement, SSI index
-            creation, and the Mirror Protocol bridge remain designs with no
-            implementation behind them.
+            The gated mainnet path has been exercised once against the live SoDEX
+            venue: a human-approved BTC-PERP long filled at $62,802 and was closed
+            reduce-only minutes later, a round trip costing about a cent on a $12
+            balance. The order could not reach the venue until a person approved
+            it. That is one verification fill with symbolic capital, not a
+            live-money track record; the fund runs on testnet. On-chain grant
+            enforcement, SSI index creation, and the Mirror Protocol bridge remain
+            designs with no implementation behind them.
           </p>
           <p>
             The credibility claim is narrower and stronger: every number on this

@@ -377,13 +377,17 @@ recent US ETF close is more than 36 hours stale.
 - **Telegram notifications.** A channel + subscribe bot deliver the daily
   cycle summary and new proposals (ships dark until credentials are set).
 
-**Mainnet.** The gated `live-mainnet` path is implemented and smoke-tested
-(mode-aware SoDEX auth, and a human-approval gate where the daily cycle records
-risk-capped orders and only an authenticated approval submits one), and it has
-**never touched the live venue**: no mainnet key is registered and no mainnet
-order has been placed. Not live capital. Switching to it takes more than the mode
-flag; the boot guard also requires a registered mainnet key. See
-`scripts/sodex-approval-smoke.ts` (19/19).
+**Mainnet.** The gated `live-mainnet` path is implemented and has been **exercised
+once against the live SoDEX venue** (2026-07-17): a human-approved BTC-PERP long
+filled at **$62,802** x 0.00017 BTC (sodexOrderId `12038402194`), closed
+reduce-only at **$62,790**, a 1.06 cent round trip on a $11.99 balance. The cycle
+provably could not place it: the order sat `pending_approval` with the venue
+reporting zero orders until an authenticated approval submitted it. Full receipt
+in [docs/wave-changelog.md](docs/wave-changelog.md).
+
+That is the whole claim. It is one verification fill with symbolic capital, not a
+live-money track record: the fund runs on testnet, and mainnet is a mode you flip
+for as long as a human is watching. See `scripts/sodex-approval-smoke.ts` (19/19).
 
 **Mirror Protocol bridge.** Still a declared interface with no implementation
 behind it, and deliberately so: we have no contract address, ABI, or docs for it,
