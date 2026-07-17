@@ -21,16 +21,29 @@
 
 import "./_env";
 import { spawnSync } from "node:child_process";
+import {
+  VALUECHAIN_MAINNET_USDC,
+  VALUECHAIN_MAINNET_RPC,
+} from "@/lib/chain/valuechain";
 
 const CASE_VAR = "__BRIDGE_SMOKE_CASE";
 
+// A synthetic mainnet env. The margin asset and RPC must be the REAL mainnet
+// values, not placeholders: lib/utils/env.ts binds them to the mode by value and
+// refuses to boot on a mismatch, so a fake "0x2222..." no longer parses as
+// mainnet at all. Nothing here reaches a network (the child asserts the bridge
+// refuses to build a tx), so the real addresses are inert.
+//
+// SODEX_API_KEY / SODEX_MAINNET_SIGNING_KEY are gone from the schema: probed
+// 2026-07-17, mainnet signs exactly like testnet with the master wallet, and the
+// registered-key model in docs/sodex-live.md 13 turned out to be false. zod
+// stripped them silently, so they were dead weight here.
 const MAINNET_ENV: Record<string, string> = {
   SONAR_EXECUTION_MODE: "live-mainnet",
   SONAR_ALLOW_MAINNET: "true",
   SONAR_REQUIRE_MANUAL_APPROVAL: "true",
-  SODEX_API_KEY: "smoke-key-name",
-  SODEX_MAINNET_SIGNING_KEY: `0x${"1".repeat(64)}`,
-  VALUECHAIN_USDC_ADDRESS: `0x${"2".repeat(40)}`,
+  VALUECHAIN_USDC_ADDRESS: VALUECHAIN_MAINNET_USDC,
+  VALUECHAIN_RPC_URL: VALUECHAIN_MAINNET_RPC,
   SODEX_WALLET_PRIVATE_KEY: `0x${"3".repeat(64)}`,
 };
 

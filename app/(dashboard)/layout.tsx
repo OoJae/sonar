@@ -1,9 +1,16 @@
 import Link from "next/link";
 import Image from "next/image";
-import { Badge } from "@/components/ui/badge";
 import { DashboardNav } from "@/components/dashboard-nav";
+import { ModeToggle } from "@/components/mode-toggle";
 import { executionModeLabel } from "@/lib/utils/mode";
 import { env } from "@/lib/utils/env";
+
+// This layout reads env() at render, so it must never be prerendered: a static
+// badge would freeze at build-time mode and then lie after a flip. It was
+// dynamic only because all nine dashboard pages happen to force-dynamic, which
+// one new page could silently break. Now that the badge is the mode control,
+// that implicit invariant is load-bearing, so state it here.
+export const dynamic = "force-dynamic";
 
 export default function DashboardLayout({
   children,
@@ -23,13 +30,7 @@ export default function DashboardLayout({
             </span>
           </Link>
           <DashboardNav />
-          <Badge
-            variant="outline"
-            className="mono text-[10px] uppercase tracking-[0.18em]"
-            title="SONAR_EXECUTION_MODE"
-          >
-            {mode}
-          </Badge>
+          <ModeToggle initialMode={mode} />
         </div>
       </header>
       <main className="mx-auto w-full max-w-6xl flex-1 px-8 py-10">

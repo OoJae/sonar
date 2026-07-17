@@ -247,6 +247,47 @@ export const delegations = pgTable(
   }),
 );
 
+// Signed admin actions. Today only "set_mode" (arming or disarming live-mainnet
+// via POST /api/admin/mode).
+//
+// This is both the replay defense and the audit log, and it is deliberately a
+// stronger artifact than the approval audit next to it: orders.approvedBy is free
+// text from an x-approved-by header, so it records whatever the caller typed and
+// is not an identity. Every row here carries an EIP-712 signature that recovers
+// to an allowlisted address, so it attributes the act of arming real money to a
+// specific key. The signature is UNIQUE, which makes a replayed payload a no-op
+// insert (the delegations.signature idiom) rather than a second flip.
+export const adminActions = pgTable(
+  "admin_actions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    action: text("action").notNull(), // "set_mode"
+    fromMode: text("from_mode"),
+    toMode: text("to_mode").notNull(),
+    // Lowercased 0x address recovered from the signature, not supplied by the caller.
+    actor: text("actor").notNull(),
+    // 0x + 130 hex. Unique => replay-safe and idempotent.
+    signature: text("signature").notNull().unique(),
+    // uint256 as text to avoid bigint precision loss (delegations.nonce idiom).
+    nonce: text("nonce").notNull(),
+    issuedAt: timestamp("issued_at", { withTimezone: true }).notNull(),
+    expiry: timestamp("expiry", { withTimezone: true }).notNull(),
+    // Stamped once the drop-in is on disk and the restart is scheduled. Null
+    // means nothing changed: the request was refused by an interlock or the
+    // preflight, or it was a no-op (the mode asked for was already the mode).
+    // Not "refused": the row is recorded before those checks run, on purpose, so
+    // that a rejected attempt to arm real money still leaves a trace.
+    appliedAt: timestamp("applied_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => ({
+    actorIdx: index("admin_actions_actor_idx").on(t.actor),
+  }),
+);
+export type AdminActionRow = typeof adminActions.$inferSelect;
+
 // Wave 3 custom SSI index proposals. One row per agent-generated themed basket
 // (constituents + weights + cited rationale + pricing coverage). A design
 // artifact that maps onto SSI Protocol on-chain index creation; never created

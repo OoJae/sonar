@@ -42,6 +42,24 @@ export type RunResult =
 // runAgentCycle finally. See the guard in runAgentCycle for why.
 let cycleInFlight = false;
 
+/**
+ * Is a cycle running right now?
+ *
+ * Exported for POST /api/admin/mode, which restarts the process and must never
+ * do so mid-cycle: an exit between the delta-neutral SSI long (paper, fills
+ * instantly) and its BTC hedge leaves the book 100% net long, and on restart
+ * runDeltaNeutral skips mainnet entirely, so nothing ever repairs it. The exit
+ * would also strand the agent_runs row with finishedAt null, since the finally
+ * never runs.
+ *
+ * This mutex, not acquireRunLock, is the only reliable signal: runAgentCycle
+ * takes no lock, and the "sonar:demo:lock" that /api/agent/demo-run and
+ * /api/orders/approve share does not cover the cron entrypoint at all.
+ */
+export function isCycleInFlight(): boolean {
+  return cycleInFlight;
+}
+
 export async function runAgentCycle(opts?: {
   universe?: UniverseKey[];
 }): Promise<RunResult> {

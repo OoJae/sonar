@@ -17,6 +17,10 @@ import { createPublicClient, http, formatUnits, getAddress, defineChain } from "
 import { base } from "viem/chains";
 import { privateKeyToAccount } from "viem/accounts";
 import { env } from "@/lib/utils/env";
+import {
+  VALUECHAIN_MAINNET_CHAIN_ID,
+  VALUECHAIN_TESTNET_CHAIN_ID,
+} from "@/lib/chain/valuechain";
 import { logger } from "@/lib/utils/logger";
 import { getVenueVusdc } from "@/lib/sodex/client";
 
@@ -32,16 +36,28 @@ const ERC20_BALANCE_OF_ABI = [
 
 const USDC_DECIMALS = 6;
 
-// ValueChain testnet (chainId 138565). Not in viem's bundled chain list.
-// RPC confirmed by probe 2026-05-29: https://testnet.valuechain.xyz returns
-// chainId 138565. The transport reads VALUECHAIN_RPC_URL with a hard default.
-function valueChainTestnet(rpcUrl: string) {
+// ValueChain. Not in viem's bundled chain list, so it is defined here.
+//
+// Mode-aware, and it has to be: the chain id must track the RPC the transport is
+// pointed at. This used to hardcode 138565 while reading VALUECHAIN_RPC_URL and
+// VALUECHAIN_USDC_ADDRESS, both of which are mode-dependent, so on live-mainnet
+// it would have described the testnet chain while querying mainnet. Probed
+// 2026-07-17: each USDC address is dead code on the other chain, so a mismatch
+// returns zero rather than an error. That is the "did my real funds land?" row
+// reading a confident, wrong zero at exactly the wrong moment. lib/utils/env.ts
+// now refuses to boot such a config, and this keeps the two consistent.
+function valueChainFor(mode: string, rpcUrl: string) {
+  const isMainnet = mode === "live-mainnet";
   return defineChain({
-    id: 138565,
-    name: "ValueChain Testnet",
-    nativeCurrency: { name: "Soso", symbol: "tSOSO", decimals: 18 },
+    id: isMainnet ? VALUECHAIN_MAINNET_CHAIN_ID : VALUECHAIN_TESTNET_CHAIN_ID,
+    name: isMainnet ? "ValueChain" : "ValueChain Testnet",
+    nativeCurrency: {
+      name: "Soso",
+      symbol: isMainnet ? "SOSO" : "tSOSO",
+      decimals: 18,
+    },
     rpcUrls: { default: { http: [rpcUrl] } },
-    testnet: true,
+    testnet: !isMainnet,
   });
 }
 
@@ -90,13 +106,15 @@ export async function getAgentBalances(): Promise<AgentBalances> {
     notes.push("Base USDC read failed; check BASE_RPC_URL.");
   }
 
-  // 2. ValueChain testnet vUSDC (raw ERC-20 at the wallet). Usually 0:
-  // deposited funds are custodied by the SoDEX venue, not held raw.
+  // 2. ValueChain vUSDC (raw ERC-20 at the wallet), on whichever ValueChain the
+  // current mode points at. Usually 0: deposited funds are custodied by the
+  // SoDEX venue, not held raw.
+  const vcLabel = e.SONAR_EXECUTION_MODE === "live-mainnet" ? "mainnet" : "testnet";
   let valuechainOnchainUsdc: string | null = null;
   if (e.VALUECHAIN_USDC_ADDRESS) {
     try {
       const vcClient = createPublicClient({
-        chain: valueChainTestnet(e.VALUECHAIN_RPC_URL),
+        chain: valueChainFor(e.SONAR_EXECUTION_MODE, e.VALUECHAIN_RPC_URL),
         transport: http(e.VALUECHAIN_RPC_URL),
       });
       const raw = await vcClient.readContract({
@@ -111,7 +129,7 @@ export async function getAgentBalances(): Promise<AgentBalances> {
         address,
         error: err instanceof Error ? err.message : String(err),
       });
-      notes.push("ValueChain testnet vUSDC read failed; check VALUECHAIN_RPC_URL.");
+      notes.push(`ValueChain ${vcLabel} vUSDC read failed; check VALUECHAIN_RPC_URL.`);
     }
   } else {
     notes.push(

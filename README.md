@@ -262,9 +262,43 @@ live run is:
 | `BASE_RPC_URL` | yes (defaulted) | `https://mainnet.base.org` |
 | `VALUECHAIN_RPC_URL` | yes (defaulted) | `https://rpc.valuechain.xyz` |
 | `CRON_SECRET` | required in prod | `openssl rand -hex 24` |
+| `SONAR_ADMIN_ADDRESSES` | only for the mode toggle | comma-separated 0x addresses |
 | `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` | optional | https://cloud.langfuse.com |
 
 `.env.local` is gitignored. **Never commit real keys.**
+
+### Execution mode, and the kill switch
+
+`SONAR_EXECUTION_MODE` is `paper`, `live-testnet`, or `live-mainnet`. It is a
+**boot-time** property: `env()` is cached for the process lifetime, so changing it
+requires a restart. That is deliberate rather than a limitation. The boot guard
+runs once, the per-venue account and symbol caches in
+[lib/sodex/client.ts](lib/sodex/client.ts) are only cleared by a fresh process,
+and `submitApprovedOrder` compares a stored `orders.mode` against `env()`
+precisely because env cannot move underneath it.
+
+Mainnet takes three variables, not one: the mode, the ValueChain **mainnet** USDC
+(the margin asset), and a mainnet RPC. Each USDC address is dead code on the other
+chain, so a half-flip reads as a silent zero balance rather than an error.
+[lib/utils/env.ts](lib/utils/env.ts) binds all three to the mode and refuses to
+boot on a mismatch, in both directions.
+
+In production the mode is flipped by an allowlisted admin wallet from the header
+badge, which signs an EIP-712 payload to `POST /api/admin/mode`. The server
+verifies the signature, preflights the resulting config, writes
+`/root/sonar/.env.mode` (a systemd `EnvironmentFile` drop-in listed after
+`.env.local`, so it wins), and restarts. Every flip is recorded in `admin_actions`
+with the signature it was authorized by.
+
+**Kill switch**, and the recovery path for anything that goes wrong:
+
+```bash
+rm /root/sonar/.env.mode && systemctl restart sonar   # back to the .env.local baseline
+```
+
+No drop-in means testnet. If a bad drop-in ever does reach disk, the boot guard in
+[instrumentation.ts](instrumentation.ts) deletes it and exits, and systemd restarts
+onto that same baseline within seconds.
 
 ---
 

@@ -32,15 +32,22 @@
 // Usage: pnpm tsx scripts/sodex-approval-smoke.ts
 
 import "./_env";
+import {
+  VALUECHAIN_MAINNET_USDC,
+  VALUECHAIN_MAINNET_RPC,
+} from "@/lib/chain/valuechain";
 // Force mainnet BEFORE any module reads env() (it is cached on first read).
+// Safe to import the constants above first: that module reads no env.
 process.env.SONAR_EXECUTION_MODE = "live-mainnet";
 process.env.SONAR_ALLOW_MAINNET = "true";
 process.env.SONAR_REQUIRE_MANUAL_APPROVAL = "true";
-// `||` not `??`: .env.local carries this as an EMPTY string, which ?? would keep
-// (only null/undefined trigger it) and which env.ts then normalizes to undefined,
-// tripping the mainnet boot guard.
-process.env.VALUECHAIN_USDC_ADDRESS =
-  process.env.VALUECHAIN_USDC_ADDRESS || `0x${"2".repeat(40)}`;
+// Assign unconditionally, NOT `x = x || fallback`. env.ts now binds the margin
+// asset and RPC to the mode BY VALUE, so inheriting .env.local's testnet USDC
+// while claiming live-mainnet is precisely the config the guard exists to reject.
+// A placeholder does not work either. Pretending to be mainnet now means carrying
+// a real, internally consistent mainnet profile. Nothing here touches a network.
+process.env.VALUECHAIN_USDC_ADDRESS = VALUECHAIN_MAINNET_USDC;
+process.env.VALUECHAIN_RPC_URL = VALUECHAIN_MAINNET_RPC;
 
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
