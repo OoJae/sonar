@@ -26,8 +26,8 @@
 //   - Leaves all rows in the DB for inspection via /portfolio and /log.
 
 import "./_env";
-import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
+import { seedSyntheticRunAndThesis } from "./_synthetic-thesis";
 import { db, schema } from "@/lib/db/client";
 import { placeOrder } from "@/lib/sodex/executor";
 import { env } from "@/lib/utils/env";
@@ -45,27 +45,13 @@ async function main() {
   }
   console.log(`Mode: ${mode}`);
 
-  const runId = randomUUID();
-  const thesisId = randomUUID();
-  const now = new Date();
-  await db().insert(schema.agentRuns).values({
-    id: runId,
-    startedAt: now,
-    finishedAt: now,
+  // Not cleaned up afterwards, unlike the approval smoke: this one places a REAL
+  // testnet order, so its rows are genuine fill history and stay on the record.
+  const { runId, thesisId } = await seedSyntheticRunAndThesis({
     model: "smoke-2.2",
-    dataSource: "fixture",
-    ok: true,
-  });
-  await db().insert(schema.theses).values({
-    id: thesisId,
-    runId,
-    generatedAt: now,
-    asOf: now,
-    mode: "trade",
-    status: "valid",
-    reasoning:
-      "Phase 2.2 live executor smoke; one BTC-PERP market buy, asserted idempotent across a second placeOrder call.",
-    payload: { smoke: "phase-2.2" },
+    note:
+      "Phase 2.2 live executor smoke; one BTC-PERP market buy, asserted " +
+      "idempotent across a second placeOrder call.",
   });
   console.log(`thesisId: ${thesisId}`);
   console.log(`runId:    ${runId}`);

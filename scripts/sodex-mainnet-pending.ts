@@ -17,8 +17,8 @@
 //     ^ close form: sizes by QUANTITY so the close matches the fill exactly.
 
 import "./_env";
-import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
+import { seedSyntheticRunAndThesis } from "./_synthetic-thesis";
 import { db, schema } from "@/lib/db/client";
 import { env } from "@/lib/utils/env";
 import { placeOrder } from "@/lib/sodex/executor";
@@ -48,28 +48,15 @@ async function main() {
     console.log(`Sizing close: ${qtyArg} BTC x $${px.toFixed(2)} = $${notionalUSD.toFixed(2)}`);
   }
 
-  const runId = randomUUID();
-  const thesisId = randomUUID();
-  const now = new Date();
-  await db().insert(schema.agentRuns).values({
-    id: runId,
-    startedAt: now,
-    finishedAt: now,
+  // Kept on the record, not cleaned up: an approved order from this script is a
+  // real mainnet fill.
+  const { runId, thesisId } = await seedSyntheticRunAndThesis({
     model: "mainnet-one-fill",
     dataSource: "live",
-    ok: true,
-  });
-  await db().insert(schema.theses).values({
-    id: thesisId,
-    runId,
-    generatedAt: now,
-    asOf: now,
-    mode: "trade",
-    status: "valid",
-    reasoning:
-      `Wave 3 mainnet verification: one human-approved BTC-PERP ${side} on the live SoDEX venue, ` +
-      `to prove the gated mainnet path end to end with symbolic capital. Not a directional view.`,
-    payload: { verification: "wave-3-one-fill", side },
+    note:
+      `Wave 3 mainnet verification: one human-approved BTC-PERP ${side} on the ` +
+      `live SoDEX venue, to prove the gated mainnet path end to end with ` +
+      `symbolic capital. Not a directional view.`,
   });
 
   console.log(`\nrunId:    ${runId}`);

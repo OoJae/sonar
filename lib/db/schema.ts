@@ -59,6 +59,12 @@ export const agentRuns = pgTable("agent_runs", {
   // the lookahead horizon made the cycle de-risk. Human-readable, cites the
   // event. Null on normal cycles.
   haltReason: text("halt_reason"),
+  // True when a test script, not the agent, created this run. Smoke tests must
+  // seed a run because orders.runId is a notNull FK, so their rows land in the
+  // same tables the public /log reads. The flag keeps them out of the decision
+  // log without deleting real fill history, and a crashed smoke leaves a row
+  // that is marked rather than one that lies.
+  synthetic: boolean("synthetic").notNull().default(false),
 });
 
 export const theses = pgTable("theses", {

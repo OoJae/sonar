@@ -1,4 +1,4 @@
-import { desc } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { db, schema } from "@/lib/db/client";
 import { traceUrl } from "@/lib/utils/logger";
 import {
@@ -54,6 +54,10 @@ async function load() {
     const runs = await db()
       .select()
       .from(schema.agentRuns)
+      // Smoke tests must seed a run (orders.runId is a notNull FK) and land in
+      // this table. They are not agent decisions, so they do not belong in the
+      // decision log.
+      .where(eq(schema.agentRuns.synthetic, false))
       .orderBy(desc(schema.agentRuns.startedAt))
       .limit(30);
     return { runs, error: null as string | null };

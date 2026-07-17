@@ -29,6 +29,12 @@ import type { EtfAsset } from "@/lib/agent/thesis";
 
 export const dynamic = "force-dynamic";
 
+// Scan a window rather than trusting the newest row: a single payload that fails
+// ThesisSchema must not blank the public page. Rows predating a schema change, or
+// seeded by a script, are skipped in favour of the newest thesis that still
+// parses. 20 covers several days of cycles; past that, showing nothing is honest.
+const THESIS_SCAN_DEPTH = 20;
+
 async function loadLatestThesis(): Promise<Thesis | null> {
   try {
     const rows = await db()
@@ -39,11 +45,12 @@ async function loadLatestThesis(): Promise<Thesis | null> {
       // rebalance cycle and must not shadow it here.
       .where(eq(schema.theses.strategy, "directional"))
       .orderBy(desc(schema.theses.generatedAt))
-      .limit(1);
-    const row = rows[0];
-    if (!row) return null;
-    const parsed = ThesisSchema.safeParse(row.payload);
-    return parsed.success ? parsed.data : null;
+      .limit(THESIS_SCAN_DEPTH);
+    for (const row of rows) {
+      const parsed = ThesisSchema.safeParse(row.payload);
+      if (parsed.success) return parsed.data;
+    }
+    return null;
   } catch {
     return null;
   }
@@ -71,6 +78,9 @@ async function loadLatestHaltReason(): Promise<string | null> {
     const rows = await db()
       .select({ haltReason: schema.agentRuns.haltReason })
       .from(schema.agentRuns)
+      // Skip script-seeded runs: they never set haltReason, so the newest one
+      // would silently clear a real circuit breaker off the page.
+      .where(eq(schema.agentRuns.synthetic, false))
       .orderBy(desc(schema.agentRuns.startedAt))
       .limit(1);
     return rows[0]?.haltReason ?? null;
@@ -174,6 +184,9 @@ function headline(thesis: Thesis) {
     .slice()
     .sort((a, b) => Math.abs(b.deltaFromCurrent) - Math.abs(a.deltaFromCurrent))[0];
   if (!primary) return "No change to index allocations.";
+  // A zero delta is neither a trim nor an add. Saying "Trim" here would put a
+  // claim on the page that the thesis does not make.
+  if (primary.deltaFromCurrent === 0) return "No change to index allocations.";
   const direction = primary.deltaFromCurrent > 0 ? "Lean into" : "Trim";
   return `${direction} ${primary.index} at ${(primary.targetWeight * 100).toFixed(0)}% of book.`;
 }

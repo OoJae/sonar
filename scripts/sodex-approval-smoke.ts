@@ -45,6 +45,7 @@ process.env.VALUECHAIN_USDC_ADDRESS =
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { and, eq } from "drizzle-orm";
+import { seedSyntheticRunAndThesis } from "./_synthetic-thesis";
 import { db, schema } from "@/lib/db/client";
 import { env } from "@/lib/utils/env";
 import { placeOrder as executorPlaceOrder } from "@/lib/sodex/executor";
@@ -68,29 +69,19 @@ function assert(name: string, cond: boolean, detail = "") {
   }
 }
 
+const SMOKE_MODEL = "approval-smoke";
+
+// Every run this smoke seeds, so the cleanup can delete them by id rather than
+// by matching on the model string.
+const seeded: { runId: string; thesisId: string }[] = [];
+
 async function seedRunAndThesis(): Promise<{ runId: string; thesisId: string }> {
-  const runId = randomUUID();
-  const thesisId = randomUUID();
-  const now = new Date();
-  await db().insert(schema.agentRuns).values({
-    id: runId,
-    startedAt: now,
-    finishedAt: now,
-    model: "approval-smoke",
-    dataSource: "fixture",
-    ok: true,
+  const row = await seedSyntheticRunAndThesis({
+    model: SMOKE_MODEL,
+    note: "Approval gate smoke.",
   });
-  await db().insert(schema.theses).values({
-    id: thesisId,
-    runId,
-    generatedAt: now,
-    asOf: now,
-    mode: "trade",
-    status: "valid",
-    reasoning: "approval gate smoke",
-    payload: { smoke: "approval" },
-  });
-  return { runId, thesisId };
+  seeded.push(row);
+  return row;
 }
 
 async function main() {
@@ -294,7 +285,10 @@ async function main() {
     `orders went ${before.length} -> ${after.length}`,
   );
 
-  // Clean up every row this smoke created so /signals and /track stay honest.
+  // Clean up every row this smoke created so /signals, /log and /track stay
+  // honest. This smoke contacts no venue, so nothing it wrote records a real
+  // fill and all of it is safe to drop. Delete in FK order: orders and
+  // paper_trades, then theses (signals cascade), then the runs.
   const allSmoke = await db().select().from(schema.orders);
   const smokeIds = allSmoke
     .filter((r) => created.includes(r.id) || r.thesisId === dnRun.thesisId)
@@ -302,7 +296,23 @@ async function main() {
   for (const id of smokeIds) {
     await db().delete(schema.orders).where(eq(schema.orders.id, id));
   }
-  console.log(`\nCleaned up ${smokeIds.length} smoke order rows.`);
+  for (const { runId } of seeded) {
+    // By runId, not thesisId: delta-neutral persists its own thesis under the
+    // same run, and that row must go too.
+    const theses = await db()
+      .select({ id: schema.theses.id })
+      .from(schema.theses)
+      .where(eq(schema.theses.runId, runId));
+    for (const { id } of theses) {
+      await db().delete(schema.paperTrades).where(eq(schema.paperTrades.thesisId, id));
+      await db().delete(schema.orders).where(eq(schema.orders.thesisId, id));
+      await db().delete(schema.theses).where(eq(schema.theses.id, id));
+    }
+    await db().delete(schema.agentRuns).where(eq(schema.agentRuns.id, runId));
+  }
+  console.log(
+    `\nCleaned up ${smokeIds.length} smoke order rows and ${seeded.length} seeded runs.`,
+  );
 
   console.log("\n8. reduceOnly reaches the wire on a reducing order");
   {
