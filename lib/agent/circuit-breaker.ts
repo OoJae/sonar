@@ -39,17 +39,28 @@ export async function evaluateMacroWindow(opts?: {
   const horizonMs = horizonHours * 60 * 60 * 1000;
 
   const events = opts?.events ?? (await getMacroEvents());
-  // The nearest upcoming high-impact event within the horizon. An event that
-  // already passed today still counts as "in window" until it falls behind
-  // by the horizon, because the volatility tail outlasts the print.
+  // The macro API gives DATE-only events, anchored to ~13:30 UTC (the US release
+  // time). The old check was a symmetric +/-horizon window around that anchor,
+  // which pretends an hour-level precision the data does not have AND, with the
+  // 6h default, can never contain the 04:00 UTC daily cron: 04:00 is 9.5h before
+  // a 13:30 print, so the ONLY scheduled cycle never de-risked for any event,
+  // while /about, /risk, and the landing page advertised it as an active control.
+  //
+  // Evaluate at day granularity to match the data: a high-impact event is in
+  // window if it falls on the current UTC trading day (the volatility spans the
+  // whole session, before and after the print), or if it is still upcoming
+  // within the hours horizon (so a late-night run also catches an early event).
+  const nowMs = now.getTime();
+  const nowUtcDay = now.toISOString().slice(0, 10);
   let chosen: MacroEvent | null = null;
   for (const ev of events) {
     if (ev.impact !== "high") continue;
-    const at = new Date(ev.at).getTime();
-    const delta = at - now.getTime();
-    // Active if the event is within [now - horizon, now + horizon].
-    if (delta <= horizonMs && delta >= -horizonMs) {
-      if (!chosen || Math.abs(at - now.getTime()) < Math.abs(new Date(chosen.at).getTime() - now.getTime())) {
+    const at = new Date(ev.at);
+    const delta = at.getTime() - nowMs;
+    const sameUtcDay = at.toISOString().slice(0, 10) === nowUtcDay;
+    const upcomingWithinHorizon = delta >= 0 && delta <= horizonMs;
+    if (sameUtcDay || upcomingWithinHorizon) {
+      if (!chosen || Math.abs(delta) < Math.abs(new Date(chosen.at).getTime() - nowMs)) {
         chosen = ev;
       }
     }

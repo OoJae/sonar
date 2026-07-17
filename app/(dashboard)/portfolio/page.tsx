@@ -184,10 +184,10 @@ export default async function PortfolioPage() {
               tag="rules-based carry"
               accent
               showNeutrality
-              description="Long the basket, short a sized BTC perp, so net crypto beta is about zero."
+              description="Long the basket, short a BTC perp sized to the basket BTC weight, so the BTC beta is hedged. Residual alt-crypto exposure remains."
               stats={dnStats}
               positions={deltaNeutral}
-              emptyCopy="Establishes its book on the next priced cycle: long the MAG7 basket, short a BTC-USD perp sized to the basket BTC weight, net crypto beta about zero."
+              emptyCopy="Establishes its book on the next priced cycle: long the MAG7 basket, short a BTC-USD perp sized to the basket BTC weight. The short hedges the BTC beta only; residual alt-crypto exposure remains."
             />
           </div>
           <TradesTable trades={trades} />

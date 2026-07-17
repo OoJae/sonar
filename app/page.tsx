@@ -62,7 +62,7 @@ const STRATA: Array<{
     depth: "04",
     name: "execute",
     heading: "Sign, fill, record.",
-    body: "Index rebalance legs are simulated against the book; perp hedges go to SoDEX as EIP-712 signed orders. On testnet they fire; on mainnet the cycle records them for a human to approve and submits nothing itself. A second, rules-based delta-neutral book runs beside the directional one. Every fill links back to the thesis that authorized it.",
+    body: "Index rebalance legs are simulated against the book; perp hedges route to SoDEX as EIP-712 signed orders. In paper mode both are simulated; on testnet the hedges fire; on mainnet the cycle records them for a human to approve and submits nothing itself. A second, rules-based delta-neutral book runs beside the directional one. Every fill links back to the thesis that authorized it.",
   },
   {
     depth: "05",

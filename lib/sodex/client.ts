@@ -590,7 +590,7 @@ export type SubmitPerpOrderInput = {
   side: "buy" | "sell";
   symbolName: string;       // e.g. "BTC-USD"; resolved to symbolID via the cache.
   type: "market" | "limit";
-  clOrdID: string;          // idempotency key (clientOrderId); the server returns the existing order on a re-submit.
+  clOrdID: string;          // our client order id. NOT a venue idempotency key: probed 2026-07-17, the venue does NOT dedupe a repeated clOrdID (same key twice = two orders, both fill). Idempotency is enforced by our own UNIQUE orders.client_order_id.
   // Exactly one of quantity / funds. For market orders we typically pass funds.
   quantity?: string;
   funds?: string;
@@ -626,10 +626,11 @@ export type SubmitPerpOrderResult = {
 // only call path that exercises signing on the testnet, so Phase 2.2's
 // scripts/sodex-live-smoke.ts is also the de-facto signing-validation test.
 //
-// Idempotency: pass the same clOrdID twice and the server should return the
-// existing order rather than create a second one. The lib/sodex/live.ts
-// caller persists an `orders` row before this call with the same clOrdID;
-// the DB-level unique constraint is the second backstop.
+// Idempotency is OURS, not the venue's. Probed 2026-07-17: the same clOrdID
+// submitted twice creates two orders and both fill; the venue does not dedupe.
+// So the lib/sodex/live.ts caller persists an `orders` row with a UNIQUE
+// client_order_id BEFORE this call, and that DB constraint is the only thing
+// that stops a double-place. Do not rely on any server-side dedupe here.
 // ---------------------------------------------------------------------------
 export async function submitPerpOrder(
   input: SubmitPerpOrderInput,

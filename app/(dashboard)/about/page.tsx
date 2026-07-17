@@ -29,7 +29,7 @@ const RAILS: Array<{ title: string; body: string }> = [
   },
   {
     title: "Session-key delegation",
-    body: "A user signs a scoped, expiring, revocable EIP-712 grant (markets + max notional) that the executor enforces before every order. App-level enforcement, honestly labeled.",
+    body: "A user signs a scoped, expiring, revocable EIP-712 grant (markets + max notional). When enforcement is enabled, the executor checks it before every order. It is opt-in and off for the autonomous cron by default, so the demo runs without it. App-level enforcement, honestly labeled.",
   },
   {
     title: "Human approval on mainnet",
@@ -110,11 +110,11 @@ export default function AboutPage() {
             <li>
               <span className="mono text-foreground">5. Publish.</span> Thesis,
               fills, NAV snapshots, risk state, and the forward tests of every
-              AI-designed index proposal land on this dashboard, the{" "}
+              AI-designed index proposal land on this dashboard and the{" "}
               <Link href="/docs" className="text-accent hover:underline">
                 public API and MCP tools
               </Link>
-              , and Telegram.
+              .
             </li>
           </ol>
         </CardContent>
@@ -149,9 +149,10 @@ export default function AboutPage() {
           <p>
             This is paper plus SoDEX testnet execution during the buildathon,
             not a live-money track record. No deposits are accepted; nothing
-            here is investment advice. Delegation is enforced at the application
-            layer (the venue does not verify grants); index proposals are priced
-            design artifacts, not on-chain products. The SSI legs are simulated
+            here is investment advice. Delegation is an app-layer control (the
+            venue does not verify grants) and is opt-in, off by default for the
+            autonomous cron; index proposals are priced design artifacts, not
+            on-chain products. The SSI legs are simulated
             in every mode: Sonar reads each index composition on-chain and prices
             it live, but it does not mint or burn, so the index book is an
             accounting of what those weights would do.
