@@ -17,9 +17,9 @@ sourced thesis where every numeric claim links to the signal behind it. The thes
 rebalances a book across MAG7.ssi, DEFI.ssi, and MEME.ssi and hedges with signed
 SoDEX perps.
 
-Wave 1 was paper; Wave 2 went live on SoDEX testnet. Wave 3 makes it mainnet-ready
-and capital-gated: the fund can execute on mainnet, but only through a
-human-approval gate, and we proved the path with one real signed fill. Sonar holds
+Wave 3 makes it mainnet-ready and capital-gated: the fund can execute on mainnet,
+but only through a human-approval gate, and we proved the path with one real signed
+fill. Sonar holds
 no user funds, is transparent (every trade carries a thesis id, every failed run
 stays in the log), and is accountable (a thesis that states numbers without citing
 a signal is rejected). Honesty is the moat, not a disclaimer.
@@ -27,11 +27,11 @@ a signal is rejected). Honesty is the moat, not a disclaimer.
 ## Target Users
 
 * **Retail crypto holders:** SSI index exposure with active, transparent
-  rebalancing instead of static buy-and-hold, and a plain reason for every trade.
+  rebalancing and a plain reason for every trade.
 * **Solo quants and small funds:** builders without the legal, custody, and infra
-  overhead to run a fund, who want a vehicle that turns research into action.
-* **SoSoValue power users:** analysts already citing the platform's ETF flow data
-  who want it operationalized into decisions, not just dashboards.
+  overhead to run a fund, who want research turned into action.
+* **SoSoValue power users:** analysts citing the platform's ETF flow data who want
+  it operationalized into decisions, not dashboards.
 
 ## Core Logic and Architecture
 
@@ -50,26 +50,25 @@ close:
    (perp hedges as EIP-712 signed SoDEX orders through the risk gate; SSI legs
    recorded against the book). On live-mainnet the cycle cannot submit: it records
    the risk-capped order and stops, and only an authenticated human approval places
-   it. Flipping to paper is an instant kill switch.
+   it. Flipping to paper is the kill switch.
 
 ## Wave 1 (Shipped)
 
-Live SoSoValue integration (High Frequency tier, 100 rpm, cached); the agent loop
-on `mimo-v2.5-pro` with seven typed tools; a citation renderer turning each
-`[ref:id]` into a numbered source chip; the 36-hour freshness rule (the agent
-no-trades on stale data); the SSI reader on Base; a paper engine shaped like the
-SoDEX order; and three stdio MCP servers.
+Live SoSoValue integration (100 rpm, cached); the agent loop on `mimo-v2.5-pro`
+with seven typed tools; a citation renderer turning each `[ref:id]` into a numbered
+source chip; the 36-hour freshness rule; the SSI reader on Base; a paper engine
+shaped like the SoDEX order; three stdio MCP servers.
 
 ## Wave 2 (Shipped)
 
 Live SoDEX testnet execution: real EIP-712 signed perp orders, idempotent
 (deterministic clOrdID + unique DB constraint), fill-polled, risk-gated. The
-verifiable track record at `/track` (book versus a buy-and-hold baseline,
-per-thesis attribution, win rate, no-trade days included, every number tracing to a
-dated thesis). Off-chain NAV pricing each index's on-chain tokenset against
-SoSoValue feeds. A macro circuit breaker that de-risks around CPI/FOMC/NFP windows.
-An interactive rate-limited run-a-cycle control, Langfuse-traced. Hardening under
-systemd + nginx + TLS at https://sonar.my.id.
+verifiable track record at `/track` (book vs a buy-and-hold baseline, per-thesis
+attribution, win rate, no-trade days, every number tracing to a dated thesis).
+Off-chain NAV per index priced against SoSoValue feeds. A macro
+circuit breaker that de-risks around CPI/FOMC/NFP windows. An interactive
+rate-limited run-a-cycle control, Langfuse-traced. Hardening under systemd + nginx
++ TLS at https://sonar.my.id.
 
 ## Wave 3 (Shipped)
 
@@ -96,9 +95,12 @@ systemd + nginx + TLS at https://sonar.my.id.
   gates. Drawdown (25%), one-cycle VaR, and average index correlation are enforced
   portfolio guards: breach any and the cycle de-risks (notional to a third, tilt to
   USSI). Concentration stays measured.
+* **Brand and interface.** A full visual identity (mark, favicon, a generated
+  1200x630 social card) and a dark-navy-and-gold terminal system across every page,
+  with an immersive landing built around a live animated sonar scope.
 * **Adversarial audit and remediation.** A multi-agent review found and fixed real
-  defects, including a cross-strategy sizing bug and a track page that overstated
-  performance during a data outage. The published numbers now match the code.
+  defects (a cross-strategy sizing bug, a track page that overstated performance on
+  a data outage); the published numbers now match the code.
 * **MCP surface.** An MCP server exposes theses, track record, risk, portfolio, and
   index proposals as tools.
 
