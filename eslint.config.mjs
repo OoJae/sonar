@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Gitignored production/demo assets (Playwright capture + HyperFrames video
+    // project), which are standalone CommonJS + Node tooling, not app code.
+    "demo/**",
   ]),
 ]);
 

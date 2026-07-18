@@ -142,6 +142,12 @@ const EnvShape = z.object({
   // historical VaR shown on /risk and used by the risk metrics.
   SONAR_MAX_DRAWDOWN_PCT: z.coerce.number().positive().default(25),
   SONAR_VAR_CONFIDENCE: z.coerce.number().gt(0).lt(1).default(0.95),
+  // The two metrics that used to be measured-not-enforced now gate too, through
+  // the same de-risk path as the drawdown cap. Defaults sit above current observed
+  // values (book VaR ~3%, average index correlation ~0.66) so they are real
+  // ceilings that will not fire on the demo; tighten via env to make them bite.
+  SONAR_MAX_VAR_PCT: z.coerce.number().positive().default(8),
+  SONAR_MAX_CORRELATION: z.coerce.number().gt(0).max(1).default(0.85),
   // Interactive public run-a-cycle demo budget, "<count>/<windowSeconds>".
   // Default: 1 run per 300s globally. Parsed by the demo-run endpoint.
   SONAR_PUBLIC_RUN_RATELIMIT: z

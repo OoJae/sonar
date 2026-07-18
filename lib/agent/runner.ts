@@ -18,7 +18,7 @@ import { computeAllNavs } from "@/lib/ssi/nav";
 import { getEtfSummaryHistory } from "@/lib/sosovalue/client";
 import { evaluateMacroWindow, type BreakerState } from "@/lib/agent/circuit-breaker";
 import { setDeRiskFactor, clearDeRisk, resetCycle } from "@/lib/sodex/risk";
-import { evaluateDrawdownGuard } from "@/lib/risk/governance";
+import { evaluatePortfolioRiskGuard } from "@/lib/risk/governance";
 import { persistThesis } from "./persist";
 import { runDeltaNeutral } from "@/lib/strategy/delta-neutral";
 import { notifyCycleFinished } from "@/lib/notify/cycle";
@@ -130,10 +130,11 @@ export async function runAgentCycle(opts?: {
     // server-side (the risk gate scales caps, executeAllocations tilts weights),
     // so the de-risk holds even if the model ignores the prompt.
     breaker = await evaluateMacroWindow({ nowIso });
-    // Production risk engine: the drawdown guard composes with the macro
-    // breaker. The most conservative de-risk factor wins, and both reasons are
-    // persisted so /log and /risk show why the cycle de-risked.
-    const riskGuard = await evaluateDrawdownGuard();
+    // Production risk engine: the portfolio guard (drawdown + VaR + correlation
+    // caps) composes with the macro breaker. The most conservative de-risk factor
+    // wins, and every reason is persisted so /log and /risk show why the cycle
+    // de-risked.
+    const riskGuard = await evaluatePortfolioRiskGuard();
     const factors: number[] = [];
     const reasons: string[] = [];
     if (breaker.active) {
@@ -155,7 +156,7 @@ export async function runAgentCycle(opts?: {
         runId,
         deRiskFactor: combinedDeRisk,
         macroEvent: breaker.event?.name ?? null,
-        drawdown: riskGuard.active,
+        portfolioRisk: riskGuard.active,
       });
     }
 

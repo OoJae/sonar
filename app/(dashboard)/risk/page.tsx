@@ -40,11 +40,11 @@ export default async function RiskPage() {
         <h1 className="display text-4xl tracking-tight">Risk</h1>
         <p className="max-w-2xl text-sm text-muted-foreground">
           Portfolio-level risk measured off the reconstructed book: historical
-          Value-at-Risk, drawdown against an enforced cap, index correlation, and
-          concentration. Drawdown is the one that acts: breach the cap and the
-          cycle de-risks, the same server-side control as the macro circuit
-          breaker. VaR, correlation and concentration are measured and published,
-          not enforced; nothing gates on them.
+          Value-at-Risk, drawdown, index correlation, and concentration. Drawdown,
+          VaR, and average index correlation are enforced: breach any cap and the
+          cycle de-risks, the same server-side control as the macro circuit breaker
+          (notional capped and allocations tilted toward USSI). Concentration is
+          measured and published, not enforced.
         </p>
       </div>
 
@@ -111,15 +111,22 @@ export default async function RiskPage() {
             <CardHeader>
               <CardTitle className="text-base">Active controls</CardTitle>
               <CardDescription>
-                The limits on every order that reaches the venue. The simulated
-                SSI index legs are sized against the book rather than these caps,
-                because they move no money; the caps exist to bound what does.
-                Flip <span className="mono">SONAR_EXECUTION_MODE=paper</span> and
-                restart to stop live placement entirely.
+                The portfolio guards de-risk the whole cycle when breached
+                (drawdown, VaR, correlation); the notional caps bound every order
+                that reaches the venue. The simulated SSI index legs are sized
+                against the book rather than the notional caps, because they move
+                no money; the caps exist to bound what does. Flip{" "}
+                <span className="mono">SONAR_EXECUTION_MODE=paper</span> and restart
+                to stop live placement entirely.
               </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-3 sm:grid-cols-2">
               <Limit label="Max drawdown cap" value={`${cap}%`} />
+              <Limit label="VaR cap (1-cycle)" value={`${e.SONAR_MAX_VAR_PCT}%`} />
+              <Limit
+                label="Correlation cap"
+                value={e.SONAR_MAX_CORRELATION.toFixed(2)}
+              />
               <Limit
                 label="Per-order cap"
                 value={`$${e.SONAR_MAX_NOTIONAL_PER_ORDER.toLocaleString()}`}

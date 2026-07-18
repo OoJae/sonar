@@ -24,8 +24,8 @@ const RAILS: Array<{ title: string; body: string }> = [
     body: "A high-impact macro event (CPI, FOMC) inside the lookahead window de-risks the cycle before it happens: caps scale down and weights tilt toward the stable reference.",
   },
   {
-    title: "Drawdown guard",
-    body: "When the book's drawdown crosses the configured cap, sizing is automatically scaled down until the curve recovers. Loss-triggered, on top of the calendar-triggered breaker.",
+    title: "Portfolio risk engine",
+    body: "Drawdown, one-cycle VaR, and average index correlation each carry an enforced cap. Breach any and the cycle de-risks: caps scale down, weights tilt to the stable reference. On top of the calendar-triggered breaker.",
   },
   {
     title: "Session-key delegation",
@@ -93,10 +93,11 @@ export default function AboutPage() {
               any numeric claim without a source.
             </li>
             <li>
-              <span className="mono text-foreground">3. Gate.</span> Macro
-              calendar and drawdown state can de-risk the cycle before a single
-              order is sized. The risk gate then caps every order that reaches
-              the venue: dust floor, per-order, per-cycle, and position caps.
+              <span className="mono text-foreground">3. Gate.</span> The macro
+              calendar and the portfolio guards (drawdown, VaR, correlation) can
+              de-risk the cycle before a single order is sized. The risk gate then
+              caps every order that reaches the venue: dust floor, per-order,
+              per-cycle, and position caps.
             </li>
             <li>
               <span className="mono text-foreground">4. Execute.</span> SSI
